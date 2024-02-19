@@ -199,6 +199,8 @@ dmypy.json
 .pybuilder
 
 venv/
+.venv/
+5s-clip/
 
 dataset/
 runs/

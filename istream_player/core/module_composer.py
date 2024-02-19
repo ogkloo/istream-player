@@ -11,6 +11,10 @@ from istream_player.modules.abr.abr_bandwidth import BandwidthABRController
 from istream_player.modules.abr.abr_buffer import BufferABRController
 from istream_player.modules.abr.abr_dash import DashABRController
 from istream_player.modules.abr.abr_hybrid import HybridABRController
+
+#pd468 - add to Registerd Module Composer
+from istream_player.modules.abr.abr_lol import LolpABRController
+
 from istream_player.modules.analyzer.analyzer import PlaybackAnalyzer
 from istream_player.modules.analyzer.event_logger import EventLogger
 from istream_player.modules.analyzer.file_content_listener import \
@@ -228,7 +232,7 @@ class PlayerComposer:
         self.register_module("bw", [BandwidthMeterImpl], single_initializer, "Bandwidth Estimation", False, "bw_meter")
         self.register_module(
             "abr",
-            [DashABRController, BufferABRController, BandwidthABRController, HybridABRController],
+            [DashABRController, BufferABRController, BandwidthABRController, HybridABRController, LolpABRController],
             single_initializer,
             "Adaptive Bitrate Controller",
             False,

@@ -54,7 +54,9 @@ def main():
 
     # Load default values
     config = PlayerConfig()
-
+    args["input"] = "/home/pd468/istream-player/istream-player/tests/resources/static_1as_1repr_4seg.mpd"
+    
+    
     # First load from config file
     if args["config"] is not None:
         load_from_config_file(args["config"], config)
