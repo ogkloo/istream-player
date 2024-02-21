@@ -37,7 +37,9 @@ def load_from_config_file(config_path: str, config: PlayerConfig):
         with open(config_path) as f:
             return load_from_dict(json.load(f), config)
     else:
-        raise Exception(f"Config file format not supported. Use JSON or YAML. Used : {config_path}")
+        raise Exception(
+            f"Config file format not supported. Use JSON or YAML. Used : {config_path}"
+        )
 
 
 def main():
@@ -54,19 +56,31 @@ def main():
 
     # Load default values
     config = PlayerConfig()
-    args["input"] = "/home/pd468/istream-player/istream-player/tests/resources/static_1as_1repr_4seg.mpd"
-    
-    
+    # args["input"] = (
+    #     "/home/pd468/istream-player/istream-player/5s-clip/multi_resolution.mpd"
+    # )
+    args["input"] = (
+        "/home/pd468/istream-player/istream-player/tests/resources/static_1as_1repr_4seg.mpd"
+    )
+
+    args["mod_abr"] = "lol"
+
     # First load from config file
     if args["config"] is not None:
         load_from_config_file(args["config"], config)
         del args["config"]
 
     if args["verbose"]:
-        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)20s %(levelname)8s:\t%(message)s")
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s %(name)20s %(levelname)8s:\t%(message)s",
+        )
         del args["verbose"]
     else:
-        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)20s %(levelname)8s:\t%(message)s")
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(name)20s %(levelname)8s:\t%(message)s",
+        )
 
     # Then override from arguments
     load_from_dict(args, config)
@@ -78,6 +92,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-

@@ -1,5 +1,10 @@
 # test_with_pytest.py
+import os
+import sys
 
+_path = os.path.expanduser("~/istream-player/istream-player/")
+os.chdir(_path)
+sys.path.append(_path)
 
 from dataclasses import dataclass
 from pathlib import Path, PosixPath
@@ -8,6 +13,7 @@ from typing import Literal
 import unittest
 from random import randbytes
 from unittest.mock import patch
+
 
 from istream_player.config.config import PlayerConfig
 from istream_player.core.module_composer import PlayerComposer
@@ -37,12 +43,12 @@ def mock_request_read():
 def mock_path_stat():
 
     @dataclass
-    class MockStat():
+    class MockStat:
         st_size = len(MOCK_FILE_CONTEN)
         st_mode: int = S_IFREG
 
     def _mock(path: PosixPath, *args, **kwargs):
-        if str(path).endswith('.mpd') or str(path).endswith('.m4s'):
+        if str(path).endswith(".mpd") or str(path).endswith(".m4s"):
             return MockStat()
         else:
             return MockStat(st_mode=S_IFDIR)
@@ -66,7 +72,10 @@ class StaticTest(unittest.IsolatedAsyncioTestCase):
         config.static.max_initial_bitrate = 100_000
         return config
 
-    @patch("istream_player.modules.downloader.local.LocalClient.request_read", new_callable=mock_request_read)
+    @patch(
+        "istream_player.modules.downloader.local.LocalClient.request_read",
+        new_callable=mock_request_read,
+    )
     @patch("pathlib.Path.stat", new_callable=mock_path_stat)
     @patch("istream_player.modules.analyzer.analyzer.PlaybackAnalyzer.save_file")
     async def test_static_local360(self, p_save_file, p_stat, p_request_read):

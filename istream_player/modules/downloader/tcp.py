@@ -72,7 +72,9 @@ class TCPClientImpl(Module, DownloadManager):
     def is_busy(self):
         return self._is_busy
 
-    async def download(self, request: DownloadRequest, save: bool = False) -> Optional[bytes]:
+    async def download(
+        self, request: DownloadRequest, save: bool = False
+    ) -> Optional[bytes]:
         url = request.url
         self._waiting_urls[url] = asyncio.Event()
         self._content[url] = bytearray()
@@ -105,7 +107,9 @@ class TCPClientImpl(Module, DownloadManager):
                     f"Bytes transferred: length: {len(chunk)}, position: {len(self._content[url])}, size: {size}, url: {url}"
                 )
                 for listener in self.listeners:
-                    await listener.on_bytes_transferred(len(chunk), url, len(self._content[url]), size, chunk)
+                    await listener.on_bytes_transferred(
+                        len(chunk), url, len(self._content[url]), size, chunk
+                    )
         self.log.info(f"Transfer ends: {len(self._content[url])}")
         self._completed_urls.add(url)
         self._waiting_urls[url].set()
@@ -121,10 +125,14 @@ class TCPClientImpl(Module, DownloadManager):
             self._downloading_task = asyncio.create_task(self._download_inner(req_url))
 
     async def _create_session(self, session_start_event):
-        ssl_context = ssl.SSLContext(protocol=ssl.PROTOCOL_TLS_SERVER, verify_mode=ssl.CERT_NONE)
+        ssl_context = ssl.SSLContext(
+            protocol=ssl.PROTOCOL_TLS_SERVER, verify_mode=ssl.CERT_NONE
+        )
         ssl_context.verify_mode = ssl.CERT_NONE
         # ssl_context.keylog_filename = self.ssl_keylog_file
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session:
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_context)
+        ) as session:
             self._session = session
             session_start_event.set()
             task = asyncio.create_task(self._download_task())

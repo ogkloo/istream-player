@@ -10,7 +10,9 @@ from istream_player.core.mpd_provider import MPDProvider
 from istream_player.models.mpd_objects import AdaptationSet
 
 
-@ModuleOption("dash", default=True, requires=[BandwidthMeter, BufferManager, MPDProvider])
+@ModuleOption(
+    "dash", default=True, requires=[BandwidthMeter, BufferManager, MPDProvider]
+)
 class DashABRController(Module, ABRController):
     log = logging.getLogger("DashABRController")
 
@@ -48,7 +50,11 @@ class DashABRController(Module, ABRController):
         id: int
             The representation id
         """
-        representations = sorted(adaptation_set.representations.values(), key=lambda x: x.bandwidth, reverse=True)
+        representations = sorted(
+            adaptation_set.representations.values(),
+            key=lambda x: x.bandwidth,
+            reverse=True,
+        )
 
         for representation in representations:
             if representation.bandwidth < bw:
@@ -56,7 +62,9 @@ class DashABRController(Module, ABRController):
         # If there's no representation whose bitrate is lower than the estimate, return the lowest one
         return representations[-1].id
 
-    def update_selection(self, adaptation_sets: Dict[int, AdaptationSet], index: int) -> Dict[int, int]:
+    def update_selection(
+        self, adaptation_sets: Dict[int, AdaptationSet], index: int
+    ) -> Dict[int, int]:
         assert self.mpd_provider.mpd is not None, "MPD File not downloaded"
 
         # Only use 70% of measured bandwidth
@@ -76,16 +84,22 @@ class DashABRController(Module, ABRController):
             bw_per_adaptation_set = available_bandwidth / (num_videos + num_audios)
             ideal_selection: Dict[int, int] = dict()
             for adaptation_set in adaptation_sets.values():
-                ideal_selection[adaptation_set.id] = self.choose_ideal_selection(adaptation_set, bw_per_adaptation_set)
+                ideal_selection[adaptation_set.id] = self.choose_ideal_selection(
+                    adaptation_set, bw_per_adaptation_set
+                )
         else:
             bw_per_video = (available_bandwidth * 0.8) / num_videos
             bw_per_audio = (available_bandwidth * 0.2) / num_audios
             ideal_selection: Dict[int, int] = dict()
             for adaptation_set in adaptation_sets.values():
                 if adaptation_set.content_type == "video":
-                    ideal_selection[adaptation_set.id] = self.choose_ideal_selection(adaptation_set, bw_per_video)
+                    ideal_selection[adaptation_set.id] = self.choose_ideal_selection(
+                        adaptation_set, bw_per_video
+                    )
                 else:
-                    ideal_selection[adaptation_set.id] = self.choose_ideal_selection(adaptation_set, bw_per_audio)
+                    ideal_selection[adaptation_set.id] = self.choose_ideal_selection(
+                        adaptation_set, bw_per_audio
+                    )
 
         buffer_level = self.buffer_manager.buffer_level
         final_selections = dict()
@@ -96,15 +110,24 @@ class DashABRController(Module, ABRController):
                 representations = adaptation_set.representations
                 last_repr = representations[self._last_selections.get(id_, 0)]
                 ideal_repr = representations[ideal_selection.get(id_, 0)]
-                self.log.info(f"buffer_level={buffer_level}, panic_buffer={self.panic_buffer}")
+                self.log.info(
+                    f"buffer_level={buffer_level}, panic_buffer={self.panic_buffer}"
+                )
                 if buffer_level < self.panic_buffer:
-                    final_repr_id = last_repr.id if last_repr.bandwidth < ideal_repr.bandwidth else ideal_repr.id
+                    final_repr_id = (
+                        last_repr.id
+                        if last_repr.bandwidth < ideal_repr.bandwidth
+                        else ideal_repr.id
+                    )
                 elif buffer_level > self.safe_buffer:
                     if last_repr.bandwidth > ideal_repr.bandwidth:
                         if adaptation_set.content_type == "video":
                             bw_per_video = (available_bandwidth * 0.8) / num_videos
-                            next_segment_download_time = (last_repr.bandwidth + ideal_repr.bandwidth) * (
-                                self.mpd_provider.mpd.max_segment_duration / bw_per_video
+                            next_segment_download_time = (
+                                last_repr.bandwidth + ideal_repr.bandwidth
+                            ) * (
+                                self.mpd_provider.mpd.max_segment_duration
+                                / bw_per_video
                             )
                             self.log.info(
                                 f"bw_per_video={bw_per_video}, last_repr.bandwidth={last_repr.bandwidth}, "
@@ -112,8 +135,11 @@ class DashABRController(Module, ABRController):
                             )
                         else:
                             bw_per_audio = (available_bandwidth * 0.2) / num_audios
-                            next_segment_download_time = (last_repr.bandwidth + ideal_repr.bandwidth) * (
-                                self.mpd_provider.mpd.max_segment_duration / bw_per_audio
+                            next_segment_download_time = (
+                                last_repr.bandwidth + ideal_repr.bandwidth
+                            ) * (
+                                self.mpd_provider.mpd.max_segment_duration
+                                / bw_per_audio
                             )
                         if next_segment_download_time <= buffer_level:
                             final_repr_id = last_repr.id
@@ -127,5 +153,7 @@ class DashABRController(Module, ABRController):
         else:
             final_selections = ideal_selection
         self._last_selections = final_selections
-        self.log.info(f"Final selection at {self.bandwidth_meter.bandwidth} is {final_selections}")
+        self.log.info(
+            f"Final selection at {self.bandwidth_meter.bandwidth} is {final_selections}"
+        )
         return final_selections

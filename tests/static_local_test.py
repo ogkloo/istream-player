@@ -19,14 +19,16 @@ class StaticTest(unittest.IsolatedAsyncioTestCase):
             mod_abr=abr,
             mod_analyzer=["data_collector:plots_dir=./runs/test/plots"],
             mod_downloader="local:bw=100_000",
-            time_factor=1
+            time_factor=1,
         )
         config.static.max_initial_bitrate = 100_000
         return config
 
     @parameterized.expand([["dash"]])
     async def test_static(self, abr: str):
-        save_file_patcher = patch("istream_player.modules.analyzer.analyzer.PlaybackAnalyzer.save_file")
+        save_file_patcher = patch(
+            "istream_player.modules.analyzer.analyzer.PlaybackAnalyzer.save_file"
+        )
         save_file_mock = save_file_patcher.start()
 
         composer = PlayerComposer()

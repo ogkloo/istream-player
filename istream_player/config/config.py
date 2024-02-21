@@ -17,7 +17,9 @@ class StaticConfig(object):
     vq_threshold = 0.8
 
     # [Not Used] VQ threshold for size ratio
-    vq_threshold_size_ratio = min_frame_chunk_ratio * (min_frame_chunk_ratio + (1 - min_frame_chunk_ratio) * vq_threshold)
+    vq_threshold_size_ratio = min_frame_chunk_ratio * (
+        min_frame_chunk_ratio + (1 - min_frame_chunk_ratio) * vq_threshold
+    )
 
     # Update interval
     update_interval = 0.05
@@ -85,5 +87,6 @@ class PlayerConfig:
 
     def validate(self) -> None:
         """Assert if config properties are set properly"""
-        assert bool(self.input), "A non-empty '--input' arg or 'input' config is required"
-
+        assert bool(
+            self.input
+        ), "A non-empty '--input' arg or 'input' config is required"
