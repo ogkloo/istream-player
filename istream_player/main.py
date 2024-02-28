@@ -6,6 +6,13 @@ from typing import Dict, List
 
 import yaml
 
+import os
+
+_path = os.path.expanduser("~/istream-player/istream-player/")
+os.chdir(_path)
+sys.path.append(_path)
+
+
 from istream_player.config.config import PlayerConfig
 from istream_player.core.module_composer import PlayerComposer
 
@@ -56,12 +63,12 @@ def main():
 
     # Load default values
     config = PlayerConfig()
-    # args["input"] = (
-    #     "/home/pd468/istream-player/istream-player/5s-clip/multi_resolution.mpd"
-    # )
     args["input"] = (
-        "/home/pd468/istream-player/istream-player/tests/resources/static_1as_1repr_4seg.mpd"
+        "/home/pd468/istream-player/istream-player/bbb-5s/multi_resolution.mpd"
     )
+    # args["input"] = (
+    #     "/home/pd468/istream-player/istream-player/tests/resources/static_1as_1repr_4seg.mpd"
+    # )
 
     args["mod_abr"] = "lol"
 
