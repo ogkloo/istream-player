@@ -115,7 +115,6 @@ class LocalClient(Module, DownloadManager):
         if bw_history is not None:
             keys_by_index = list(bw_history.keys())
         while True:
-            print("Getting response from transfer_queue")
             url, chunk = await self.transfer_queue.get()
             if chunk:
                 self.content[url].extend(chunk)
@@ -129,24 +128,15 @@ class LocalClient(Module, DownloadManager):
                     await listener.on_transfer_end(self.transfer_size[url], url)
             # Add bandwidth limiting here
             time += float(self.time_factor) * float(self.max_packet_size) / float(self.bw)
-            print(time)
             if bw_history is not None:
                 if time < float(keys_by_index[1]):
-                    print('0 time case')
                     self.bw = bw_history[keys_by_index[0]]
-                    print(self.bw)
                 else:
-                    print('time > 1')
                     for i in range(1, len(keys_by_index)):
-                        print('searching for key: ', i)
                         if float(keys_by_index[i]) > time:
-                            print('found key: ', i)
                             self.bw = bw_history[keys_by_index[i-1]]
-                            print("BW: ", self.bw)
                             break
-                        print('broke?: ', i)
             # else bandwidth constant
-            print("After discovering bandwidth:", float(self.time_factor) * float(self.max_packet_size) / float(self.bw))
             await asyncio.sleep(float(self.time_factor) * float(self.max_packet_size) / float(self.bw))
 
 def csv_to_dict(csv_file):
