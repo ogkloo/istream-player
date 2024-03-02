@@ -1,4 +1,5 @@
 import asyncio
+import csv
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -11,7 +12,10 @@ from istream_player.core.module import Module, ModuleOption
 
 @ModuleOption("local", default=True)
 class LocalClient(Module, DownloadManager):
-    def __init__(self, *, bw="100000000000") -> None:
+    # Controls the bandwidth of the local downloader in bps
+    #def __init__(self, *, bw="100_000_000_000") -> None:
+    def __init__(self, *, bw="1_000_000") -> None:
+        # 1_333_000_000
         super().__init__()
         self.bw = int(bw)  # Not implemented
         self.max_packet_size = 20_000
@@ -23,7 +27,11 @@ class LocalClient(Module, DownloadManager):
         self.downloader_task: Optional[asyncio.Task] = None
 
     async def setup(self, config: PlayerConfig, **kwargs):
-        self.downloader_task = asyncio.create_task(self.throttled_download(), name="TASK_LOCAL_DOWNLOADER")
+        try:
+            bw_history = csv_to_dict(config.bandwidth_history_trace_file)
+        except:
+            bw_history = None
+        self.downloader_task = asyncio.create_task(self.throttled_download(bw_history), name="TASK_LOCAL_DOWNLOADER")
         self.time_factor = config.time_factor
 
     async def cleanup(self):
@@ -98,9 +106,16 @@ class LocalClient(Module, DownloadManager):
                 if not data:
                     break
 
-    async def throttled_download(self):
+    async def throttled_download(self, bw_history: Dict[float, int]):
+        '''
+            bw_history: Maps time in seconds to a bandwidth in bps
+        '''
+        # Time in seconds
+        time = 0
+        if bw_history is not None:
+            keys_by_index = list(bw_history.keys())
         while True:
-            # print("Getting response from transfer_queue")
+            print("Getting response from transfer_queue")
             url, chunk = await self.transfer_queue.get()
             if chunk:
                 self.content[url].extend(chunk)
@@ -112,5 +127,37 @@ class LocalClient(Module, DownloadManager):
                 self.transfer_compl[url].set()
                 for listener in self.listeners:
                     await listener.on_transfer_end(self.transfer_size[url], url)
-            await asyncio.sleep(self.time_factor * self.max_packet_size / self.bw)
+            # Add bandwidth limiting here
+            time += float(self.time_factor) * float(self.max_packet_size) / float(self.bw)
+            print(time)
+            if bw_history is not None:
+                if time < float(keys_by_index[1]):
+                    print('0 time case')
+                    self.bw = bw_history[keys_by_index[0]]
+                    print(self.bw)
+                else:
+                    print('time > 1')
+                    for i in range(1, len(keys_by_index)):
+                        print('searching for key: ', i)
+                        if float(keys_by_index[i]) > time:
+                            print('found key: ', i)
+                            self.bw = bw_history[keys_by_index[i-1]]
+                            print("BW: ", self.bw)
+                            break
+                        print('broke?: ', i)
+            # else bandwidth constant
+            print("After discovering bandwidth:", float(self.time_factor) * float(self.max_packet_size) / float(self.bw))
+            await asyncio.sleep(float(self.time_factor) * float(self.max_packet_size) / float(self.bw))
 
+def csv_to_dict(csv_file):
+    '''
+        Read csv into dictionary
+    '''
+    if csv_file == None:
+        return None
+    result_dict = {}
+    with open(csv_file, newline='') as csvfile:
+        csv_reader = csv.reader(csvfile)
+        for row in csv_reader:
+            result_dict[row[0]] = row[1]
+    return result_dict

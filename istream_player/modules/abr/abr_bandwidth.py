@@ -6,7 +6,6 @@ from istream_player.core.bw_meter import BandwidthMeter
 from istream_player.core.module import Module, ModuleOption
 from istream_player.models.mpd_objects import AdaptationSet
 
-
 @ModuleOption("bandwidth", requires=[BandwidthMeter])
 class BandwidthABRController(Module, ABRController):
     def __init__(self):
@@ -39,8 +38,10 @@ class BandwidthABRController(Module, ABRController):
                     adaptation_set, bw_per_adaptation_set
                 )
         else:
-            bw_per_video = (available_bandwidth * 0.8) / num_videos
-            bw_per_audio = (available_bandwidth * 0.2) / num_audios
+            # Note: This should really be configurable
+            # Since we're testing without audio rn I've changed this to be only video
+            bw_per_video = (available_bandwidth * 1) / num_videos
+            bw_per_audio = (available_bandwidth * 0) / num_audios
             ideal_selection: Dict[int, int] = dict()
             for adaptation_set in adaptation_sets.values():
                 if adaptation_set.content_type == "video":

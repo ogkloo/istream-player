@@ -4,7 +4,7 @@ from typing import Optional
 
 class StaticConfig(object):
     # Max initial bitrate (bps)
-    max_initial_bitrate = 1000000
+    max_initial_bitrate = 100*1000000
 
     # averageSpeed = SMOOTHING_FACTOR * lastSpeed + (1-SMOOTHING_FACTOR) * averageSpeed;
     smoothing_factor = 0.5
@@ -56,6 +56,10 @@ class PlayerConfig:
     input: str = ""
     run_dir: str = ""
 
+    '''
+        Factor to multiply time-related variables in download manager by, e.g. 
+        set to 2 to do tests on double speed.
+    '''
     time_factor: float = 1
 
     # Modules
@@ -74,6 +78,8 @@ class PlayerConfig:
     panic_buffer_level: float = 2.5
     min_rebuffer_duration: float = 2
     min_start_duration: float = 2
+
+    bandwidth_history_trace_file: str | None = 'traces/mmwave-stationary1.csv'
 
     select_as: str = "-"
 
