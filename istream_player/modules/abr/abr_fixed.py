@@ -16,7 +16,9 @@ class FixedABRController(Module, ABRController):
     async def setup(self, config: PlayerConfig, **kwargs):
         pass
 
-    def update_selection(self, adaptation_sets: Dict[int, AdaptationSet], index: int) -> Dict[int, int]:
+    def update_selection(
+        self, adaptation_sets: Dict[int, AdaptationSet], index: int
+    ) -> Dict[int, int]:
         final_selections = dict()
 
         def has_seg_id(rep: Representation):
@@ -26,12 +28,18 @@ class FixedABRController(Module, ABRController):
             return False
 
         for adaptation_set in adaptation_sets.values():
-            repr = [rep for rep_id, rep in adaptation_set.representations.items() if has_seg_id(rep)]
+            repr = [
+                rep
+                for rep_id, rep in adaptation_set.representations.items()
+                if has_seg_id(rep)
+            ]
             if len(repr) == 0:
                 final_selections[adaptation_set.id] = None
             else:
                 first_repr_id = min(map(lambda r: r.id, repr))
                 num_repr = len(repr)
-                final_selections[adaptation_set.id] = first_repr_id + (self.quality % num_repr)
+                final_selections[adaptation_set.id] = first_repr_id + (
+                    self.quality % num_repr
+                )
 
         return final_selections

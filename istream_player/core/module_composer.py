@@ -11,10 +11,13 @@ from istream_player.modules.abr.abr_bandwidth import BandwidthABRController
 from istream_player.modules.abr.abr_buffer import BufferABRController
 from istream_player.modules.abr.abr_dash import DashABRController
 from istream_player.modules.abr.abr_hybrid import HybridABRController
+
+# pd468 - add to Registerd Module Composer
+from istream_player.modules.abr.lolp_abrController import LolpABRController
+
 from istream_player.modules.analyzer.analyzer import PlaybackAnalyzer
 from istream_player.modules.analyzer.event_logger import EventLogger
-from istream_player.modules.analyzer.file_content_listener import \
-    FileContentListener
+from istream_player.modules.analyzer.file_content_listener import FileContentListener
 from istream_player.modules.analyzer.playback import Playback
 from istream_player.modules.buffer.buffer_manager import BufferManagerImpl
 from istream_player.modules.bw_meter.bandwidth import BandwidthMeterImpl
@@ -58,7 +61,9 @@ def get_mod_props(val: str):
 class PlayerContext:
     log = logging.getLogger("PlayerContext")
 
-    def __init__(self, config: PlayerConfig, modules: Dict[str, Dict[str, Module]], composer) -> None:
+    def __init__(
+        self, config: PlayerConfig, modules: Dict[str, Dict[str, Module]], composer
+    ) -> None:
         self.modules = modules
         self.config = config
         self.composer = composer
@@ -84,7 +89,11 @@ class PlayerContext:
         tasks = []
         for mods in self.modules.values():
             for mod in mods.values():
-                tasks.append(asyncio.create_task(mod.run(), name=f"TASK_MOD_{mod.__mod_name__}_RUN"))
+                tasks.append(
+                    asyncio.create_task(
+                        mod.run(), name=f"TASK_MOD_{mod.__mod_name__}_RUN"
+                    )
+                )
 
         for task in tasks:
             await task
@@ -110,7 +119,11 @@ class PlayerComposer:
         self.module_options = {}
         self.modules = defaultdict(dict)
         self.module_init_fn = {}
-        self.module_cli = defaultdict(lambda: ModuleCliConfig(help="[Module]", allow_multi=False, default="", required=False))
+        self.module_cli = defaultdict(
+            lambda: ModuleCliConfig(
+                help="[Module]", allow_multi=False, default="", required=False
+            )
+        )
 
     def get_deps(self, reqs: list[str | Type[ModuleInterface]]):
         deps = []
@@ -140,11 +153,29 @@ class PlayerComposer:
             def __contains__(self, option: str):
                 return super().__contains__(option.split(":", 1)[0].lower())
 
-        parser.add_argument("--config", help="Configure using yaml/json", required=False)
-        parser.add_argument("-i", "--input", help="Manifest (MPD) file location", type=str, required=True)
-        parser.add_argument("-v", "--verbose", help="Enable debug level output", action="store_true", required=False)
-        parser.add_argument("--time_factor", help="Mutiplication factor for time delayd. Use 0-1 for speedup.", type=float)
-        parser.add_argument("--run_dir", '-d', help="Run directory", required=False)
+        parser.add_argument(
+            "--config", help="Configure using yaml/json", required=False
+        )
+        parser.add_argument(
+            "-i",
+            "--input",
+            help="Manifest (MPD) file location",
+            type=str,
+            required=True,
+        )
+        parser.add_argument(
+            "-v",
+            "--verbose",
+            help="Enable debug level output",
+            action="store_true",
+            required=False,
+        )
+        parser.add_argument(
+            "--time_factor",
+            help="Mutiplication factor for time delayd. Use 0-1 for speedup.",
+            type=float,
+        )
+        parser.add_argument("--run_dir", "-d", help="Run directory", required=False)
         # pprint(self.module_cli)
         for mod_type, mods in self.module_options.items():
             cli_opt = self.module_cli[mod_type]
@@ -180,11 +211,18 @@ class PlayerComposer:
 
         # Set or update module_cli
         prev_cli = self.module_cli[mod_type]
-        new_cli = ModuleCliConfig(help=mod_help, required=mod_required, default=mod_default, allow_multi=mod_allow_multi)
+        new_cli = ModuleCliConfig(
+            help=mod_help,
+            required=mod_required,
+            default=mod_default,
+            allow_multi=mod_allow_multi,
+        )
         new_cli["help"] = first_non_none(mod_help, prev_cli["help"])
         new_cli["required"] = first_non_none(mod_required, prev_cli["required"])
         new_cli["default"] = first_non_none(mod_default, prev_cli["default"])
-        new_cli["allow_multi"] = first_non_none(mod_allow_multi, prev_cli["allow_multi"])
+        new_cli["allow_multi"] = first_non_none(
+            mod_allow_multi, prev_cli["allow_multi"]
+        )
         prev_cli.update(new_cli)
 
         if mod_type not in self.module_options:
@@ -194,16 +232,22 @@ class PlayerComposer:
         if isinstance(mod_class, list):
             for _mod_class in mod_class:
                 if _mod_class.__mod_name__ in self.module_options[mod_type]:
-                    raise Exception(f"Module with name {_mod_class.__mod_name__} alerady registerd under {mod_type}.")
+                    raise Exception(
+                        f"Module with name {_mod_class.__mod_name__} alerady registerd under {mod_type}."
+                    )
                 self.module_options[mod_type][_mod_class.__mod_name__] = _mod_class
         else:
             if mod_class.__mod_name__ in self.module_options[mod_type]:
-                raise Exception(f"Module with name {mod_class.__mod_name__} alerady registerd under {mod_type}.")
+                raise Exception(
+                    f"Module with name {mod_class.__mod_name__} alerady registerd under {mod_type}."
+                )
             self.module_options[mod_type][mod_class.__mod_name__] = mod_class
 
     def make_player(self, config: PlayerConfig):
         if config.mod_downloader == "auto":
-            if config.input.lower().startswith("http://") or config.input.lower().startswith("https://"):
+            if config.input.lower().startswith(
+                "http://"
+            ) or config.input.lower().startswith("https://"):
                 config.mod_downloader = "tcp"
             else:
                 config.mod_downloader = "local"
@@ -216,27 +260,72 @@ class PlayerComposer:
                 continue
             mod_type_name = attr_name[4:]
             if self.module_init_fn.get(mod_type_name) is None:
-                raise Exception(f"Module init function not provided for module {mod_type_name}")
-            self.modules[mod_type_name].update(self.module_init_fn[mod_type_name](mod_type_name, val, self))
+                raise Exception(
+                    f"Module init function not provided for module {mod_type_name}"
+                )
+            self.modules[mod_type_name].update(
+                self.module_init_fn[mod_type_name](mod_type_name, val, self)
+            )
         return PlayerContext(config, self.modules, self)
 
     def register_core_modules(self):
-        self.register_module("mpd", [MPDProviderImpl], single_initializer, "MPD Provider", False, "mpd")
         self.register_module(
-            "downloader", [LocalClient, TCPClientImpl, QuicClientImpl], downloader_initializer, "Downloader", False, "local"
+            "mpd", [MPDProviderImpl], single_initializer, "MPD Provider", False, "mpd"
         )
-        self.register_module("bw", [BandwidthMeterImpl], single_initializer, "Bandwidth Estimation", False, "bw_meter")
+        self.register_module(
+            "downloader",
+            [LocalClient, TCPClientImpl, QuicClientImpl],
+            downloader_initializer,
+            "Downloader",
+            False,
+            "local",
+        )
+        self.register_module(
+            "bw",
+            [BandwidthMeterImpl],
+            single_initializer,
+            "Bandwidth Estimation",
+            False,
+            "bw_meter",
+        )
         self.register_module(
             "abr",
-            [DashABRController, BufferABRController, BandwidthABRController, HybridABRController],
+            [
+                DashABRController,
+                BufferABRController,
+                BandwidthABRController,
+                HybridABRController,
+                LolpABRController,
+            ],
             single_initializer,
             "Adaptive Bitrate Controller",
             False,
             "dash",
         )
-        self.register_module("scheduler", [SchedulerImpl], single_initializer, "Segment download scheduler", False, "scheduler")
-        self.register_module("buffer", [BufferManagerImpl], single_initializer, "Buffer manager", False, "buffer_manager")
-        self.register_module("player", [DASHPlayer], single_initializer, "Headless DASH Streamer", False, "dash")
+        self.register_module(
+            "scheduler",
+            [SchedulerImpl],
+            single_initializer,
+            "Segment download scheduler",
+            False,
+            "scheduler",
+        )
+        self.register_module(
+            "buffer",
+            [BufferManagerImpl],
+            single_initializer,
+            "Buffer manager",
+            False,
+            "buffer_manager",
+        )
+        self.register_module(
+            "player",
+            [DASHPlayer],
+            single_initializer,
+            "Headless DASH Streamer",
+            False,
+            "dash",
+        )
         self.register_module(
             "analyzer",
             [PlaybackAnalyzer, FileContentListener, Playback, EventLogger],
@@ -248,11 +337,19 @@ class PlayerComposer:
         )
 
 
-def single_initializer(mod_type, mod_name, composer: PlayerComposer) -> Dict[str, Module]:
+def single_initializer(
+    mod_type, mod_name, composer: PlayerComposer
+) -> Dict[str, Module]:
     if not isinstance(mod_name, str):
-        raise Exception(f"Module type {mod_type} only supports single module. Provided {mod_name}")
+        raise Exception(
+            f"Module type {mod_type} only supports single module. Provided {mod_name}"
+        )
 
-    return {get_mod_name(mod_name): composer.module_options[mod_type][get_mod_name(mod_name)](**get_mod_props(mod_name))}
+    return {
+        get_mod_name(mod_name): composer.module_options[mod_type][
+            get_mod_name(mod_name)
+        ](**get_mod_props(mod_name))
+    }
 
 
 def multi_initializer(mod_type, val, composer: PlayerComposer) -> Dict[str, Module]:
@@ -260,19 +357,33 @@ def multi_initializer(mod_type, val, composer: PlayerComposer) -> Dict[str, Modu
         return single_initializer(mod_type, val, composer)
     elif isinstance(val, list):
         # print(mod_type, [get_mod_name(mod) for mod in val])
-        return {get_mod_name(mod): composer.module_options[mod_type][get_mod_name(mod)](**get_mod_props(mod)) for mod in val}
+        return {
+            get_mod_name(mod): composer.module_options[mod_type][get_mod_name(mod)](
+                **get_mod_props(mod)
+            )
+            for mod in val
+        }
     elif isinstance(val, dict):
         return {
-            mod_key: composer.module_options[mod_type][get_mod_name(mod)](**get_mod_props(mod)) for mod_key, mod in val.items()
+            mod_key: composer.module_options[mod_type][get_mod_name(mod)](
+                **get_mod_props(mod)
+            )
+            for mod_key, mod in val.items()
         }
     else:
         raise Exception(f"Invalid mod value '{val}' received for mod '{mod_type}'")
 
 
-def downloader_initializer(mod_type, val, composer: PlayerComposer) -> Dict[str, Module]:
+def downloader_initializer(
+    mod_type, val, composer: PlayerComposer
+) -> Dict[str, Module]:
     if not isinstance(val, str):
-        raise Exception(f"Module type {mod_type} only supports single module. Provided {val}")
+        raise Exception(
+            f"Module type {mod_type} only supports single module. Provided {val}"
+        )
 
     _cl = composer.module_options[mod_type][get_mod_name(val)]
-    return {"mpd_downloader": _cl(**get_mod_props(val)), "segment_downloader": _cl(**get_mod_props(val))}
-
+    return {
+        "mpd_downloader": _cl(**get_mod_props(val)),
+        "segment_downloader": _cl(**get_mod_props(val)),
+    }

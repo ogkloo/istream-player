@@ -16,7 +16,11 @@ import matplotlib.pyplot as plt
 from istream_player.config.config import PlayerConfig
 from istream_player.core.analyzer import Analyzer
 from istream_player.core.buffer import BufferEventListener, BufferManager
-from istream_player.core.bw_meter import BandwidthMeter, BandwidthUpdateListener, DownloadStats
+from istream_player.core.bw_meter import (
+    BandwidthMeter,
+    BandwidthUpdateListener,
+    DownloadStats,
+)
 from istream_player.core.module import Module, ModuleOption
 from istream_player.core.mpd_provider import MPDProvider
 from istream_player.core.player import Player, PlayerEventListener
@@ -73,9 +77,18 @@ class Stall:
     time_end: float
 
 
-@ModuleOption("data_collector", default=True, requires=[MPDProvider, BandwidthMeter, Scheduler, Player, BufferManager])
+@ModuleOption(
+    "data_collector",
+    default=True,
+    requires=[MPDProvider, BandwidthMeter, Scheduler, Player, BufferManager],
+)
 class PlaybackAnalyzer(
-    Module, Analyzer, PlayerEventListener, SchedulerEventListener, BandwidthUpdateListener, BufferEventListener
+    Module,
+    Analyzer,
+    PlayerEventListener,
+    SchedulerEventListener,
+    BandwidthUpdateListener,
+    BufferEventListener,
 ):
     log = logging.getLogger("PlaybackAnalyzer")
 
@@ -107,7 +120,9 @@ class PlaybackAnalyzer(
     ):
         self.bandwidth_meter = bandwidth_meter
         self._mpd_provider = mpd_provider
-        self.dump_results_path = join(config.run_dir, "data") if config.run_dir else None
+        self.dump_results_path = (
+            join(config.run_dir, "data") if config.run_dir else None
+        )
 
         # segment_downloader.add_listener(self)
         bandwidth_meter.add_listener(self)
@@ -142,17 +157,27 @@ class PlaybackAnalyzer(
     async def on_position_change(self, position):
         self._position = position
 
-    async def on_state_change(self, position: float, old_state: State, new_state: State):
-        self._states.append((self._seconds_since(self._start_time), new_state, position))
+    async def on_state_change(
+        self, position: float, old_state: State, new_state: State
+    ):
+        self._states.append(
+            (self._seconds_since(self._start_time), new_state, position)
+        )
 
     async def on_buffer_level_change(self, buffer_level):
-        self._buffer_levels.append(BufferLevel(self._seconds_since(self._start_time), buffer_level))
+        self._buffer_levels.append(
+            BufferLevel(self._seconds_since(self._start_time), buffer_level)
+        )
 
-    async def on_segment_download_start(self, index, adap_bw: Dict[int, float], segments: Dict[int, Segment]):
+    async def on_segment_download_start(
+        self, index, adap_bw: Dict[int, float], segments: Dict[int, Segment]
+    ):
         assert self._mpd_provider.mpd is not None
 
         for as_id, segment in segments.items():
-            as_reprs = self._mpd_provider.mpd.adaptation_sets[int(as_id)].representations
+            as_reprs = self._mpd_provider.mpd.adaptation_sets[
+                int(as_id)
+            ].representations
             quality = segment.repr_id - min(as_reprs.keys())
             repr = as_reprs[segment.repr_id]
             self._segments_by_url[segment.url] = AnalyzerSegment(
@@ -165,7 +190,9 @@ class PlaybackAnalyzer(
                 bitrate=repr.bandwidth,
             )
 
-    async def on_segment_download_complete(self, index: int, segments: Dict[int, Segment], stats: Dict[int, DownloadStats]):
+    async def on_segment_download_complete(
+        self, index: int, segments: Dict[int, Segment], stats: Dict[int, DownloadStats]
+    ):
         for segment, stat in zip(segments.values(), stats.values()):
             assert stat.stop_time is not None and stat.start_time is not None
             analyzer_segment = self._segments_by_url[segment.url]
@@ -179,7 +206,9 @@ class PlaybackAnalyzer(
             analyzer_segment.total_bytes = stat.total_bytes
             analyzer_segment.stopped_bytes = stat.stopped_bytes
 
-            analyzer_segment.segment_throughput = (stat.received_bytes * 8) / (stat.stop_time - stat.start_time)
+            analyzer_segment.segment_throughput = (stat.received_bytes * 8) / (
+                stat.stop_time - stat.start_time
+            )
 
     async def on_bandwidth_update(self, bw: int) -> None:
         self._throughputs.append((self._seconds_since(self._start_time), bw))
@@ -197,9 +226,21 @@ class PlaybackAnalyzer(
         total_stall_num = 0
 
         if len(self._states) > 0 and self._states[-1][1] != State.END:
-            self._states.append((self._seconds_since(self._start_time), State.END, self._position))
+            self._states.append(
+                (self._seconds_since(self._start_time), State.END, self._position)
+            )
 
-        headers = ("Index", "Start", "End", "Quality", "Bitrate", "Adap-Th", "Seg-Th", "Ratio", "URL")
+        headers = (
+            "Index",
+            "Start",
+            "End",
+            "Quality",
+            "Bitrate",
+            "Adap-Th",
+            "Seg-Th",
+            "Ratio",
+            "URL",
+        )
         output.write("%-10s%-10s%-10s%-10s%-10s%-10s%-10s%-10s%-20s\n" % headers)
         for segment in sorted(self._segments_by_url.values(), key=lambda s: s.index):
             if last_quality is None:
@@ -284,8 +325,13 @@ class PlaybackAnalyzer(
             "dur_stall": dur_stall,
             "avg_bitrate": avg_bitrate,
             "num_quality_switches": num_quality_switches,
-            "states": [{"time": time, "state": str(state), "position": pos} for time, state, pos in states],
-            "bandwidth_estimate": [{"time": bw[0], "bandwidth": bw[1]} for bw in cont_bw],
+            "states": [
+                {"time": time, "state": str(state), "position": pos}
+                for time, state, pos in states
+            ],
+            "bandwidth_estimate": [
+                {"time": bw[0], "bandwidth": bw[1]} for bw in cont_bw
+            ],
             "buffer_level": list(map(asdict, self._buffer_levels)),
         }
 

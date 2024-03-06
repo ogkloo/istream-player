@@ -16,15 +16,21 @@ class BufferABRController(Module, ABRController):
         self.RESERVOIR = 0.1
         self.UPPER_RESERVOIR = 0.9
 
-    async def setup(self, config: PlayerConfig, buffer_manager: BufferManager, **kwargs):
+    async def setup(
+        self, config: PlayerConfig, buffer_manager: BufferManager, **kwargs
+    ):
         self.buffer_size = config.buffer_duration
         self.buffer_manager = buffer_manager
 
-    def update_selection(self, adaptation_sets: Dict[int, AdaptationSet], index: int) -> Dict[int, int]:
+    def update_selection(
+        self, adaptation_sets: Dict[int, AdaptationSet], index: int
+    ) -> Dict[int, int]:
         final_selections = dict()
 
         for adaptation_set in adaptation_sets.values():
-            final_selections[adaptation_set.id] = self.choose_ideal_selection_buffer_based(adaptation_set)
+            final_selections[adaptation_set.id] = (
+                self.choose_ideal_selection_buffer_based(adaptation_set)
+            )
 
         return final_selections
 
@@ -45,7 +51,10 @@ class BufferABRController(Module, ABRController):
         """
         next_bitrate = None
 
-        bitrates = [representation.bandwidth for representation in adaptation_set.representations.values()]
+        bitrates = [
+            representation.bandwidth
+            for representation in adaptation_set.representations.values()
+        ]
         bitrates.sort()
 
         # Calculate the current buffer occupancy percentage
@@ -80,7 +89,9 @@ class BufferABRController(Module, ABRController):
         rate_map = OrderedDict()
         rate_map[self.RESERVOIR] = bitrates[0]
         intermediate_levels = bitrates[1:-1]
-        marker_length = (self.UPPER_RESERVOIR - self.RESERVOIR) / (len(intermediate_levels) + 1)
+        marker_length = (self.UPPER_RESERVOIR - self.RESERVOIR) / (
+            len(intermediate_levels) + 1
+        )
         current_marker = self.RESERVOIR + marker_length
         for bitrate in intermediate_levels:
             rate_map[current_marker] = bitrate
