@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import datetime
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -111,10 +112,11 @@ class LocalClient(Module, DownloadManager):
             bw_history: Maps time in seconds to a bandwidth in bps
         '''
         # Time in seconds
-        time = 0
+        time = datetime.now(datetime.timezone.utc)
         if bw_history is not None:
             keys_by_index = list(bw_history.keys())
         while True:
+            print('TIME: ', time)
             url, chunk = await self.transfer_queue.get()
             if chunk:
                 self.content[url].extend(chunk)
