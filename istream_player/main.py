@@ -8,7 +8,7 @@ import yaml
 
 import os
 
-_path = os.path.expanduser("~/istream-player/istream-player/")
+_path = os.path.expanduser("~/istream-player/istream_player/")
 os.chdir(_path)
 sys.path.append(_path)
 
