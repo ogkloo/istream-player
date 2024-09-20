@@ -137,65 +137,55 @@ class SchedulerImpl(Module, Scheduler):
             notification = await self.check_messages()
             if notification is not None:
                 self.log.info("Received notification")
-                selections = {0: [4, 4, 4, 4]}
+                # Produce a list of selections to download
+                download_plan = [{0: 4}]*5
                 self.log.info(f"Downloading index {self._index} at {selections}")
                 self._current_selections = selections
 
-                # Compute which segments to download
-
                 # Download each segment one after another and don't screw up stateful variables
+                for i in range(0, len(download_plan)):
+                    selections = download_plan[i]
 
-                self.log.info(f'{selections=}')
-                # All adaptation sets take the current bandwidth
-                adap_bw = {as_id: self.bandwidth_meter.bandwidth for as_id in selections.keys()}
+                    self.log.info(f'{selections=}')
+                    # All adaptation sets take the current bandwidth
+                    adap_bw = {as_id: self.bandwidth_meter.bandwidth for as_id in selections.keys()}
 
-                # Get segments to download for each adaptation set
-                try:
-                    segments = {}
-                    for (adaptation_set_id, selection) in selections.items():
-                        # Append quality for each segment
-                        s = []
-                        for i in range(0, len(selection)):
-                            quality = selection[i]
-                            segment = self.adaptation_sets[adaptation_set_id].representations[quality].segments[self._index+i]
-                            s.append(segment)
-                        segments[adaptation_set_id] = s
-                # n.b. this will break if you do it too close to the end of a video, fix this later
-                except KeyError:
-                    # No more segments left
-                    self.log.info("No more segments left")
-                    self._end = True
-                    return
+                    # Get segments to download for each adaptation set
+                    try:
+                        segments = {
+                            adaptation_set_id: self.adaptation_sets[adaptation_set_id].representations[selection].segments[self._index]
+                            for adaptation_set_id, selection in selections.items()
+                        }
+                    except KeyError:
+                        # No more segments left
+                        self.log.info("No more segments left")
+                        self._end = True
+                        return
 
-                # Download one segment from each adaptation set
+                    # Download one segment from each adaptation set
 
-                self.log.info(f"Download starting: {selections=}, {segments=}, {adap_bw=}")
+                    self.log.info(f"Download starting: {selections=}, {segments=}, {adap_bw=}")
 
-                for listener in self.listeners:
-                    for (adaptation_set_id, s) in segments.items():
-                        for i in range(0, len(s)):
-                            adjusted_segments = {adaptation_set_id: s[i]}
-                            await listener.on_segment_download_start(self._index+i, adap_bw, adjusted_segments)
-                
-                # Download segment from each adaptation set specified
-                urls = []
-                for adaptation_set_id, selection in selections.items():
-                    for i in range(0, len(selection)):
-                        s = selection[i]
+                    for listener in self.listeners:
+                        await listener.on_segment_download_start(self._index, adap_bw, segments)
+                    
+                    # Called ~once per segment (+ reinitializations)
+                    urls = []
+                    for adaptation_set_id, selection in selections.items():
                         adaptation_set = self.adaptation_sets[adaptation_set_id]
-                        representation = adaptation_set.representations[s]
+                        representation = adaptation_set.representations[selection]
                         representation_str = "%d:%d" % (adaptation_set_id, representation.id)
 
                         # Download initial segment
                         if representation_str not in self._representation_initialized:
                             await self.download_manager.download(DownloadRequest(representation.initialization, DownloadType.STREAM_INIT))
                             await self.download_manager.wait_complete(representation.initialization)
-                            self.log.info(f"Segment {self._index+i} Complete. Move to next segment")
+                            self.log.info(f"Segment {self._index} Complete. Move to next segment")
                             self._representation_initialized.add(representation_str)
 
                         # Download next segment
                         try:
-                            segment = representation.segments[self._index+i]
+                            segment = representation.segments[self._index]
                         except IndexError:
                             self.log.info("Segments ended")
                             self._end = True
@@ -204,23 +194,18 @@ class SchedulerImpl(Module, Scheduler):
 
                         await self.download_manager.download(DownloadRequest(segment.url, DownloadType.SEGMENT))
 
-                self.log.info(f"Waiting for completion urls {urls}")
-                results = [await self.download_manager.wait_complete(url) for url in urls]
-                self.log.info(f"Completed downloading from urls {urls}")
-                if any([result is None for result in results]):
-                    # Result is None means the stream got dropped
-                    self._dropped_index = self._index
-                    continue
-
-                for (as_id, segment) in segments.items():
-                    for i in range(0, len(segment)):
-                        #download_stats = {as_id: self.bandwidth_meter.get_stats(segment.url) for as_id, segment in segments.items()}
-                        download_stats[as_id] = self.bandwidth_meter.get_stats(segment[i].url)
-                        for listener in self.listeners:
-                            adjusted_segments = {as_id: segment[i]}
-                            await listener.on_segment_download_complete(self._index+i, adjusted_segments, download_stats)
-                        self._index += 1
-                        await self.buffer_manager.enqueue_buffer({as_id: segment[i]})
+                    self.log.info(f"Waiting for completion urls {urls}")
+                    results = [await self.download_manager.wait_complete(url) for url in urls]
+                    self.log.info(f"Completed downloading from urls {urls}")
+                    if any([result is None for result in results]):
+                        # Result is None means the stream got dropped
+                        self._dropped_index = self._index
+                        continue
+                    download_stats = {as_id: self.bandwidth_meter.get_stats(segment.url) for as_id, segment in segments.items()}
+                    for listener in self.listeners:
+                        await listener.on_segment_download_complete(self._index, segments, download_stats)
+                    self._index += 1
+                    await self.buffer_manager.enqueue_buffer(segments)
 
             else:
                 self.log.info("No notification")
