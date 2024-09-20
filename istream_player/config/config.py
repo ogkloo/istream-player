@@ -1,5 +1,18 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List
+
+@dataclass
+class Prediction():
+    # Notification time is time since previous event
+    bw_old: int
+    bw_new: int 
+    notification_time: float
+    time_to_event: float
+    duration: float
+
+    @classmethod
+    def load_from_json(cls, json: dict):
+        return cls(json["bw_old"], json["bw_new"], json["notification_time"], json["time_to_event"], json["duration"])
 
 
 class StaticConfig(object):
@@ -64,8 +77,7 @@ class PlayerConfig:
     mod_mpd: str = "mpd"
     mod_downloader: str = "auto"
     mod_bw: str = "bw_meter"
-    # mod_abr: str = "dash"
-    mod_abr: str = "lol"
+    mod_abr: str = "dash"
     mod_scheduler: str = "scheduler"
     mod_buffer: str = "buffer_manager"
     mod_player: str = "dash"
@@ -84,6 +96,8 @@ class PlayerConfig:
 
     # Live event logs file path
     live_log: Optional[str] = None
+
+    #predicted_events: List[Prediction] = []
 
     def validate(self) -> None:
         """Assert if config properties are set properly"""

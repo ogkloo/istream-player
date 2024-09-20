@@ -10,3 +10,4 @@ pyyaml
 sslkeylog
 pytest
 docker
+pyzmq

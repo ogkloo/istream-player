@@ -338,7 +338,11 @@ class PlaybackAnalyzer(
         if self.dump_results_path is not None:
             PlaybackAnalyzer.save_file(self.dump_results_path, data)  # type: ignore
         else:
-            json.dump(data["segments"], sys.stdout, indent=4)
+            d = {
+                "buffer_level": data["buffer_level"],
+                "segments": data["segments"],
+            }
+            json.dump(d, sys.stdout, indent=4)
 
     @staticmethod
     def save_file(path: str, data: dict[str, Any]):

@@ -18,6 +18,7 @@ class BandwidthABRController(Module, ABRController):
     def update_selection(self, adaptation_sets: Dict[int, AdaptationSet], index: int) -> Dict[int, int]:
         # Only use 70% of measured bandwidth
         # available_bandwidth = int(self.bandwidth_meter.bandwidth * 0.7)
+        # Just use 100% of measured bandwidth
         available_bandwidth = int(self.bandwidth_meter.bandwidth)
 
         # Count the number of video adaptation sets and audio adaptation sets
@@ -39,8 +40,12 @@ class BandwidthABRController(Module, ABRController):
                     adaptation_set, bw_per_adaptation_set
                 )
         else:
-            bw_per_video = (available_bandwidth * 0.8) / num_videos
-            bw_per_audio = (available_bandwidth * 0.2) / num_audios
+            # Use all bandwidth for video streams because the MPD parser doesn't 
+            # understand audio streams from GPAC segmented videos anyway.
+            # bw_per_video = (available_bandwidth * 0.8) / num_videos
+            # bw_per_audio = (available_bandwidth * 0.2) / num_audios
+            bw_per_video = (available_bandwidth) / num_videos
+            bw_per_audio = 0
             ideal_selection: Dict[int, int] = dict()
             for adaptation_set in adaptation_sets.values():
                 if adaptation_set.content_type == "video":

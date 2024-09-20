@@ -6,14 +6,7 @@ from typing import Dict, List
 
 import yaml
 
-import os
-
-_path = os.path.expanduser("~/istream-player/istream_player/")
-os.chdir(_path)
-sys.path.append(_path)
-
-
-from istream_player.config.config import PlayerConfig
+from istream_player.config.config import PlayerConfig, Prediction
 from istream_player.core.module_composer import PlayerComposer
 
 
@@ -40,14 +33,13 @@ def load_from_config_file(config_path: str, config: PlayerConfig):
     if config_path.endswith(".yaml") or config_path.endswith(".yml"):
         with open(config_path) as f:
             return load_from_dict(yaml.safe_load(f), config)
-    elif config_path.endswith(".yaml") or config_path.endswith(".yml"):
+    elif config_path.endswith(".json"):
         with open(config_path) as f:
             return load_from_dict(json.load(f), config)
     else:
         raise Exception(
             f"Config file format not supported. Use JSON or YAML. Used : {config_path}"
         )
-
 
 def main():
     try:
@@ -63,14 +55,6 @@ def main():
 
     # Load default values
     config = PlayerConfig()
-    args["input"] = (
-        "/home/pd468/istream-player/istream-player/bbb-5s/multi_resolution.mpd"
-    )
-    # args["input"] = (
-    #     "/home/pd468/istream-player/istream-player/tests/resources/static_1as_1repr_4seg.mpd"
-    # )
-
-    args["mod_abr"] = "lol"
 
     # First load from config file
     if args["config"] is not None:
@@ -88,6 +72,12 @@ def main():
             level=logging.INFO,
             format="%(asctime)s %(name)20s %(levelname)8s:\t%(message)s",
         )
+    
+    # Add prediction events to player config
+    if args["events"] is not None:
+        with open(args["events"], 'r', encoding='utf-8') as f:
+            predicted_events = json.load(f)
+            config.predicted_events = [Prediction.load_from_json(event) for event in predicted_events]
 
     # Then override from arguments
     load_from_dict(args, config)

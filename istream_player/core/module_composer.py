@@ -187,6 +187,8 @@ class PlayerComposer:
                 choices=list(self.module_options[mod_type].keys()),
                 action=("append" if cli_opt["allow_multi"] else "store"),
             )
+        
+        parser.add_argument("--events", type=str, help="")
 
         return parser
 

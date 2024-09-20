@@ -1,10 +1,15 @@
 import asyncio
 import itertools
 import logging
+import json
+import zmq
+
+from time import sleep
+
 from asyncio import Task
 from typing import Dict, Optional, Set
 
-from istream_player.config.config import PlayerConfig
+from istream_player.config.config import (PlayerConfig, Prediction)
 from istream_player.core.abr import ABRController
 from istream_player.core.buffer import BufferManager
 from istream_player.core.bw_meter import BandwidthMeter
@@ -16,6 +21,8 @@ from istream_player.core.scheduler import Scheduler, SchedulerEventListener
 from istream_player.models import AdaptationSet
 from istream_player.utils import critical_task
 
+RECV_PORT = 5555
+ACK_PORT = 5554
 
 @ModuleOption(
     "scheduler", default=True, requires=["segment_downloader", BandwidthMeter, BufferManager, MPDProvider, ABRController]
@@ -56,6 +63,14 @@ class SchedulerImpl(Module, Scheduler):
         self.abr_controller = abr_controller
         self.mpd_provider = mpd_provider
 
+        self.context = zmq.Context()
+        self.receiver = self.context.socket(zmq.SUB)
+        self.receiver.connect(f"tcp://localhost:{RECV_PORT}")
+        self.receiver.setsockopt_string(zmq.SUBSCRIBE, "")
+
+        self.sender = self.context.socket(zmq.PUB)
+        self.sender.bind(f"tcp://localhost:{ACK_PORT}")
+
         select_as = config.select_as.split("-")
         if len(select_as) == 1 and select_as[0].isdecimal():
             self.selected_as_start = int(select_as[0])
@@ -89,6 +104,7 @@ class SchedulerImpl(Module, Scheduler):
 
         # Start from the min segment index
         self._index = self.segment_limits(self.adaptation_sets)[0]
+        # Called as often as possible
         while True:
             # Check buffer level
             if self.buffer_manager.buffer_level > self.max_buffer_duration:
@@ -115,21 +131,33 @@ class SchedulerImpl(Module, Scheduler):
                 await asyncio.sleep(self.time_factor * self.update_interval)
                 continue
 
-            # Download one segment from each adaptation set
-            if self._index == self._dropped_index:
-                selections = self.abr_controller.update_selection_lowest(self.adaptation_sets)
+            # Check predictions.
+            # Notifications are sent via ZeroMQ. To send a notification, use the associated send_notification.py
+            # script, or send a message to localhost:5555 containing the JSON of the event.
+            notification = await self.check_messages()
+            if notification is not None:
+                self.log.info("Received notification")
+                #selections = self.abr_controller.update_selection(self.adaptation_sets, self._index)
+                selections = {0: 4}
+                self.log.info(f"Downloading index {self._index} at {selections}")
+                self._current_selections = selections
             else:
-                selections = self.abr_controller.update_selection(self.adaptation_sets, self._index)
-            self.log.info(f"Downloading index {self._index} at {selections}")
-            self._current_selections = selections
+                self.log.info("No notification")
+                if self._index == self._dropped_index:
+                    selections = self.abr_controller.update_selection_lowest(self.adaptation_sets)
+                else:
+                    selections = self.abr_controller.update_selection(self.adaptation_sets, self._index)
+                self.log.info(f"Downloading index {self._index} at {selections}")
+                self._current_selections = selections
 
+            self.log.info(f'{selections=}')
             # All adaptation sets take the current bandwidth
             adap_bw = {as_id: self.bandwidth_meter.bandwidth for as_id in selections.keys()}
 
             # Get segments to download for each adaptation set
             try:
                 segments = {
-                    adaptation_set_id: self.adaptation_sets[adaptation_set_id].representations[selection].segments[self._index]
+                    adaptation_set_id: [self.adaptation_sets[adaptation_set_id].representations[selection].segments[self._index]]
                     for adaptation_set_id, selection in selections.items()
                 }
             except KeyError:
@@ -138,20 +166,31 @@ class SchedulerImpl(Module, Scheduler):
                 self._end = True
                 return
 
-            for listener in self.listeners:
-                await listener.on_segment_download_start(self._index, adap_bw, segments)
+            # Download one segment from each adaptation set
 
-            # duration = 0
+            self.log.info(f"Download starting: {selections=}, {segments=}, {adap_bw=}")
+
+            for listener in self.listeners:
+                for adapt_id, adapt_segments in segments.items():
+                    for segment in adapt_segments:
+                        s = {adapt_id: segment}
+                        await listener.on_segment_download_start(self._index, adap_bw, s)
+            
+            # Called ~once per segment (+ reinitializations)
             urls = []
             for adaptation_set_id, selection in selections.items():
                 adaptation_set = self.adaptation_sets[adaptation_set_id]
                 representation = adaptation_set.representations[selection]
                 representation_str = "%d:%d" % (adaptation_set_id, representation.id)
+
+                # Download initial segment
                 if representation_str not in self._representation_initialized:
                     await self.download_manager.download(DownloadRequest(representation.initialization, DownloadType.STREAM_INIT))
                     await self.download_manager.wait_complete(representation.initialization)
                     self.log.info(f"Segment {self._index} Complete. Move to next segment")
                     self._representation_initialized.add(representation_str)
+
+                # Download next segment
                 try:
                     segment = representation.segments[self._index]
                 except IndexError:
@@ -159,8 +198,8 @@ class SchedulerImpl(Module, Scheduler):
                     self._end = True
                     return
                 urls.append(segment.url)
+
                 await self.download_manager.download(DownloadRequest(segment.url, DownloadType.SEGMENT))
-                # duration = segment.duration
             self.log.info(f"Waiting for completion urls {urls}")
             results = [await self.download_manager.wait_complete(url) for url in urls]
             self.log.info(f"Completed downloading from urls {urls}")
@@ -220,3 +259,22 @@ class SchedulerImpl(Module, Scheduler):
 
     async def drop_index(self, index):
         self._dropped_index = index
+
+    async def check_messages(self):
+        message = None
+        try:
+            message = self.receiver.recv_string(flags=zmq.NOBLOCK)
+        except zmq.Again:
+            # No message, continue with other tasks
+            return None
+
+        # If a sender sent us something we need to ACK it so 
+        # they can stop resending.
+        if message is not None:
+            try:
+                sleep(0.1)
+                self.log.info(f"Acked control message: {message}")
+                self.sender.send_string("ack")
+                return message
+            except:
+                print("Ack send failed")
