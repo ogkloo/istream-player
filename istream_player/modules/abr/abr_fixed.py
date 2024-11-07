@@ -9,12 +9,12 @@ from istream_player.models.mpd_objects import Representation
 
 @ModuleOption("fixed")
 class FixedABRController(Module, ABRController):
-    def __init__(self, *, quality: str):
+    def __init__(self):
         super().__init__()
-        self.quality: int = int(quality)
+        self.quality: int = 0
 
     async def setup(self, config: PlayerConfig, **kwargs):
-        pass
+        self.quality = config.initial_quality
 
     def update_selection(
         self, adaptation_sets: Dict[int, AdaptationSet], index: int

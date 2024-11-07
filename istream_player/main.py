@@ -74,10 +74,11 @@ def main():
         )
     
     # Add prediction events to player config
-    if args["events"] is not None:
-        with open(args["events"], 'r', encoding='utf-8') as f:
-            predicted_events = json.load(f)
-            config.predicted_events = [Prediction.load_from_json(event) for event in predicted_events]
+    if args["initial_buffer"] is not None:
+        config.initial_buffer = args["initial_buffer"]
+    
+    if args["initial_quality"] is not None:
+        config.initial_quality = args["initial_quality"]
 
     # Then override from arguments
     load_from_dict(args, config)

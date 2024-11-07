@@ -3,16 +3,45 @@ from typing import Optional, List
 
 @dataclass
 class Prediction():
-    # Notification time is time since previous event
+    # Bandwidth before event occurs
     bw_old: int
+
+    # Bandwidth after event occurs
     bw_new: int 
-    notification_time: float
+
+    # This is time we use to set up initial conditions
+    #ready_time: float
+
+    # How long until event occurs
     time_to_event: float
+
+    # How long the event is predicted to last
     duration: float
 
+    last_valid_duration: float
+
+    #@classmethod
+    #def load_from_json(cls, json: dict):
+    #    return cls(json["bw_old"], json["bw_new"], json["time_to_event"], json["duration"])
+
     @classmethod
-    def load_from_json(cls, json: dict):
-        return cls(json["bw_old"], json["bw_new"], json["notification_time"], json["time_to_event"], json["duration"])
+    def load_from_string(cls, message):
+        # Unless you're me: Don't use this one. The other one is far more sane.
+        m = map(float, message.split(','))
+        return cls(*list(m))
+    
+    def download_time(self, file_size, t):
+        if t < self.time_to_event:
+            if file_size < self.time_to_event * self.bw_old:
+                return file_size/(self.bw_old)
+            else:
+                #if file_size < (self.time_to_event * self.bw_old) + (self.last_valid_duration * self.bw_new):
+                return (file_size-(self.time_to_event * self.bw_old))/(self.bw_new) + self.duration
+        elif t < self.time_to_event + self.duration:
+            time_in_outage = (self.time_to_event + self.duration) - t
+            return file_size/(self.bw_new) + time_in_outage
+        else:
+            return file_size/(self.bw_new)
 
 
 class StaticConfig(object):
@@ -59,7 +88,7 @@ class StaticConfig(object):
     max_packet_delay = 2
 
     # Continuous bw estimation window (s)
-    cont_bw_window = 1
+    cont_bw_window = 10
 
 
 @dataclass
@@ -71,6 +100,7 @@ class PlayerConfig:
     input: str = ""
     run_dir: str = ""
 
+    # Multiplied by update interval in many cases
     time_factor: float = 1
 
     # Modules
@@ -84,11 +114,13 @@ class PlayerConfig:
     mod_analyzer: list[str] = field(default_factory=lambda: ["data_collector"])
 
     # Buffer Configuration
-    buffer_duration: float = 8
-    safe_buffer_level: float = 6
-    panic_buffer_level: float = 2.5
-    min_rebuffer_duration: float = 2
-    min_start_duration: float = 2
+    # Buffer duration must be 1 segment length behind the live edge.
+    # e.g. buffer_duration == 3 means a live edge of 4 seconds.
+    buffer_duration: float = 1.5 - 0.5
+    safe_buffer_level: float = 1.0
+    panic_buffer_level: float = 0.5
+    min_rebuffer_duration: float = 1
+    min_start_duration: float = 1
 
     select_as: str = "-"
 
@@ -98,6 +130,9 @@ class PlayerConfig:
     live_log: Optional[str] = None
 
     #predicted_events: List[Prediction] = []
+
+    initial_buffer = 0.5 + 0.5
+    initial_quality = 4
 
     def validate(self) -> None:
         """Assert if config properties are set properly"""

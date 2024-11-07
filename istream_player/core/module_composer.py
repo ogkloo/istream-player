@@ -11,6 +11,7 @@ from istream_player.modules.abr.abr_bandwidth import BandwidthABRController
 from istream_player.modules.abr.abr_buffer import BufferABRController
 from istream_player.modules.abr.abr_dash import DashABRController
 from istream_player.modules.abr.abr_hybrid import HybridABRController
+from istream_player.modules.abr.abr_fixed import FixedABRController 
 
 # pd468 - add to Registerd Module Composer
 from istream_player.modules.abr.lolp_abrController import LolpABRController
@@ -164,6 +165,20 @@ class PlayerComposer:
             required=True,
         )
         parser.add_argument(
+            "--initial_buffer", 
+            help="Initial buffer level for fixed strategy with notification", 
+            type=float,
+            required=False, 
+            default=None
+        )
+        parser.add_argument(
+            "--initial_quality", 
+            help="Quality level for fixed strategy", 
+            type=float,
+            required=False, 
+            default=None
+        )
+        parser.add_argument(
             "-v",
             "--verbose",
             help="Enable debug level output",
@@ -188,8 +203,6 @@ class PlayerComposer:
                 action=("append" if cli_opt["allow_multi"] else "store"),
             )
         
-        parser.add_argument("--events", type=str, help="")
-
         return parser
 
     async def run(self, config: PlayerConfig):
@@ -298,6 +311,7 @@ class PlayerComposer:
                 BandwidthABRController,
                 HybridABRController,
                 LolpABRController,
+                FixedABRController,
             ],
             single_initializer,
             "Adaptive Bitrate Controller",

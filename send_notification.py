@@ -3,31 +3,42 @@ import argparse
 
 from time import sleep
 
-def main(msg, port=5555, ack_port=5554):
+def main(msg, timeout, port, ack_port):
     ctx = zmq.Context()
     publisher = ctx.socket(zmq.PUB)
-    publisher.bind(f"tcp://localhost:{port}")
+    publisher.bind(f"tcp://127.0.0.1:{port}")
 
     ack_recvr = ctx.socket(zmq.SUB)
-    ack_recvr.connect(f"tcp://localhost:{ack_port}")
+    ack_recvr.connect(f"tcp://127.0.0.1:{ack_port}")
     ack_recvr.setsockopt_string(zmq.SUBSCRIBE, "ack")
 
-    print("sending message")
 
-    sleep(0.1)
+    sleep(0.5)
     publisher.send_string(f"evs {msg}")
 
-    while True:
-        try:
-            sleep(1)
-            ack = ack_recvr.recv_string(flags=zmq.NOBLOCK)
-            print(f"Got ack {ack}")
-            return
-        except zmq.Again:
-            # No message, continue with other tasks
-            sleep(0.5)
-            print("Resending")
-            publisher.send_string(f"evs {msg}")
+    if timeout < 0:
+        print("Sent. Waiting...")
+        resend_attempts = 0
+        sleep(0.5)
+        while resend_attempts < timeout:
+            try:
+                ack = ack_recvr.recv_string(flags=zmq.NOBLOCK)
+                print(f"Got ack {ack}")
+                publisher.close()
+                ack_recvr.close()
+                ctx.term()
+                return
+            except zmq.Again:
+                print("Resending")
+                sleep(0.5)
+                publisher.send_string(f"evs {msg}")
+            resend_attempts += 1
+
+        print("connection timed out")
+
+    publisher.close()
+    ack_recvr.close()
+    ctx.term()
 
 
 if __name__ == "__main__":
@@ -41,11 +52,15 @@ if __name__ == "__main__":
     parser.add_argument("-a", "--ack_port", type=int, 
                         help="Port to receive ack on.",
                         default=5554)
+    parser.add_argument("-t", "--timeout", type=int, 
+                        help="Number of resends to attempt. 0 will not check for an ACK.",
+                        default=0)
 
     args = parser.parse_args()
 
     message: str = args.message
     send_port: int = args.send_port
     ack_port: int = args.ack_port
+    timeout: int = args.timeout
 
-    main(message, send_port, ack_port)
+    main(message, timeout, send_port, ack_port)

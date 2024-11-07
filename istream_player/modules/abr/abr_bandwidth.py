@@ -9,17 +9,16 @@ from istream_player.models.mpd_objects import AdaptationSet
 
 @ModuleOption("bandwidth", requires=[BandwidthMeter])
 class BandwidthABRController(Module, ABRController):
-    def __init__(self):
+    def __init__(self, max_bw_use=0.7):
         super().__init__()
+        self.max_bw_use = max_bw_use
 
     async def setup(self, config: PlayerConfig, bandwidth_meter: BandwidthMeter):
         self.bandwidth_meter = bandwidth_meter
 
     def update_selection(self, adaptation_sets: Dict[int, AdaptationSet], index: int) -> Dict[int, int]:
-        # Only use 70% of measured bandwidth
-        # available_bandwidth = int(self.bandwidth_meter.bandwidth * 0.7)
-        # Just use 100% of measured bandwidth
-        available_bandwidth = int(self.bandwidth_meter.bandwidth)
+        # Only use some portion of measured bandwidth
+        available_bandwidth = int(self.bandwidth_meter.bandwidth*self.max_bw_use)
 
         # Count the number of video adaptation sets and audio adaptation sets
         num_videos = 0
