@@ -99,13 +99,18 @@ class SchedulerImpl(Module, Scheduler):
         self.initial_buffer = config.initial_buffer
 
         # Configure mitigation strategy
-        if config.search_method == 'exhaustive':
-            self.search = self.exhaustive_search
-        elif config.search_method == 'greedy':
-            self.search = self.greedy_search
-        elif config.search_method == 'symmetric':
-            self.search = self.symmetric_search
+        if config.search_method == 'none':
+            self.perform_mitigation = False 
+        else:
+            self.perform_mitigation = True
+            if config.search_method == 'exhaustive':
+                self.search = self.exhaustive_search
+            elif config.search_method == 'greedy':
+                self.search = self.greedy_search
+            elif config.search_method == 'symmetric':
+                self.search = self.symmetric_search
 
+        # ZMQ stuff
         try:
             self.context = zmq.Context()
             self.receiver = self.context.socket(zmq.PULL)
@@ -113,6 +118,7 @@ class SchedulerImpl(Module, Scheduler):
         except:
             raise Exception('zmq error')
 
+        # We only need one worker really
         self.notification_worker = MessageProcessor(self.context, self.receiver, 1, self.log)
         self.notification_worker.register_callback(self.handle_message)
 
@@ -149,9 +155,7 @@ class SchedulerImpl(Module, Scheduler):
         self.adaptation_sets = self.select_adaptation_sets(self.mpd_provider.mpd.adaptation_sets)
         # print(f"{self.adaptation_sets=}")
 
-        self.log.info('before worker start')
         self.notification_worker.start()
-        self.log.info('after worker start')
 
         # Start from the min segment index
         self._index = self.segment_limits(self.adaptation_sets)[0]
@@ -160,27 +164,13 @@ class SchedulerImpl(Module, Scheduler):
 
         # Called as often as possible
         while True:
-            # Check buffer level
-            #notification = await self.check_messages()
             notification = self.notification
 
-            if notification is not None:
+            if notification is not None and self.perform_mitigation:
+                # Weird, modified part of the scheduler -- Bad code ahead!! Reader beware!!!
                 self.log.info(f'Received {notification=} @ {self.buffer_manager.buffer_level}, {self._index=}')
                 notification_received = True
-
-            # Check predictions.
-            # Notifications are sent via ZeroMQ. To send a notification, use the associated send_notification.py
-            # script, or send a message to localhost:5555 containing the JSON of the event.
-            if notification is not None:
-                #notification = ' '.join(notification.split()[1:])
-                #self.log.info(f'processing {notification=}')
-                #prediction = Prediction.load_from_string(notification)
-
-                self.log.info('hmmmm')
                 prediction = self.notification
-
-                # TODO: Refactor into a function which returns the download plan in the current format
-                # Warning: Bad code ahead. *2 shouldn't really be here, it's there bc we have 1/2s segment sizes.
 
                 download_plan = await self.search(prediction)
 
@@ -188,9 +178,9 @@ class SchedulerImpl(Module, Scheduler):
                 for selections in download_plan:
                     self.log.info(f'{selections=}')
 
-                    self.log.info(f'{self.buffer_manager.buffer_level=}')
                     # We don't need the other if/else block here bc we know that there's a notification
-                    while self.buffer_manager.buffer_level > self.max_buffer_duration:
+                    self.log.info(f'{self.buffer_manager.buffer_level=}')
+                    while self.buffer_manager.buffer_level >= self.max_buffer_duration:
                         await asyncio.sleep(self.time_factor * self.update_interval)
 
                     assert self.mpd_provider.mpd is not None
@@ -198,8 +188,6 @@ class SchedulerImpl(Module, Scheduler):
                         await self.mpd_provider.update()
                         self.adaptation_sets = self.select_adaptation_sets(self.mpd_provider.mpd.adaptation_sets)
 
-                    # last_segment = max(self.adaptation_sets[0].representations[0].segments.keys())
-                    # first_segment = min(self.adaptation_sets[0].representations[0].segments.keys())
                     first_segment, last_segment = self.segment_limits(self.adaptation_sets)
                     self.log.info(f"{first_segment=}, {last_segment=}")
 
@@ -274,25 +262,19 @@ class SchedulerImpl(Module, Scheduler):
                     await self.buffer_manager.enqueue_buffer(segments)
                 
             else:
+                # Original iStream Player code with some formatting changes
                 self.log.info("No notification")
 
                 self.log.info(f'{self.buffer_manager.buffer_level=}')
-                if notification_received == True:
-                    if self.buffer_manager.buffer_level > self.max_buffer_duration:
-                        await asyncio.sleep(self.time_factor * self.update_interval)
-                        continue
-                else:
-                    if self.buffer_manager.buffer_level == self.initial_buffer:
-                        await asyncio.sleep(self.time_factor * self.update_interval)
-                        continue
+                if self.buffer_manager.buffer_level >= self.max_buffer_duration:
+                    await asyncio.sleep(self.time_factor * self.update_interval)
+                    continue
 
                 assert self.mpd_provider.mpd is not None
                 if self.mpd_provider.mpd.type == "dynamic":
                     await self.mpd_provider.update()
                     self.adaptation_sets = self.select_adaptation_sets(self.mpd_provider.mpd.adaptation_sets)
 
-                # last_segment = max(self.adaptation_sets[0].representations[0].segments.keys())
-                # first_segment = min(self.adaptation_sets[0].representations[0].segments.keys())
                 first_segment, last_segment = self.segment_limits(self.adaptation_sets)
                 self.log.info(f"{first_segment=}, {last_segment=}")
 
@@ -314,6 +296,7 @@ class SchedulerImpl(Module, Scheduler):
                 self._current_selections = selections
 
                 self.log.info(f'{selections=}')
+
                 # All adaptation sets take the current bandwidth
                 adap_bw = {as_id: self.bandwidth_meter.bandwidth for as_id in selections.keys()}
 
@@ -394,6 +377,7 @@ class SchedulerImpl(Module, Scheduler):
         if listener not in self.listeners:
             self.listeners.append(listener)
 
+    #TODO: Some events probably _should_ cancel the download
     async def cancel_task(self, index: int):
         """
         Cancel current downloading task, and move to the next one
@@ -472,12 +456,10 @@ class SchedulerImpl(Module, Scheduler):
 
     async def exhaustive_search(self, prediction: Prediction):
         max_K = math.ceil((prediction.time_to_event + prediction.duration + prediction.last_valid_duration) * 2)
-        self.log.info(f'{max_K=}')
         adaptation_set = self.adaptation_sets[0]
         representations = adaptation_set.representations
         representations = sorted(representations.items(), key=lambda r: r[1].bandwidth)
         scored_plans = []
-        self.log.info('started scoring')
         for plan in all_products(representations, max_K):
             plan_score = await self.score(prediction, plan)
             #if plan_score[2] <= (prediction.time_to_event + prediction.duration + prediction.last_valid_duration):
@@ -485,7 +467,6 @@ class SchedulerImpl(Module, Scheduler):
                 scored_plans.append((plan_score, plan))
         
         best_plan = max(scored_plans, key=lambda x: x[0][0])
-        self.log.info(f'{best_plan[0][0]=}, {best_plan[0]}')
         best_plan_score, _ = best_plan
 
         self.log.info(f'overshoot: {best_plan_score[-1]/(1000*1000) - prediction.total_resources()}')
@@ -496,7 +477,6 @@ class SchedulerImpl(Module, Scheduler):
     
     async def greedy_search(self, prediction: Prediction):
         resources = prediction.total_resources()*(1000*1000)
-        self.log.info(f'{resources=}')
         adaptation_set = self.adaptation_sets[0]
         representations = adaptation_set.representations
         representations = sorted(representations.items(), key=lambda r: r[1].bandwidth)
@@ -510,7 +490,6 @@ class SchedulerImpl(Module, Scheduler):
         done = False
 
         while not done:
-            self.log.info(f'@start{steps=}: {[p for p,_ in plan]}')
             scores = [(representation, await self.score(prediction, plan + [representation])) for representation in representations]
             scores = [(r,s) for r,s in scores if s[-1] <= resources]
 
@@ -518,7 +497,6 @@ class SchedulerImpl(Module, Scheduler):
                 done = True
                 continue
 
-            #self.log.info(f'{[(s[0],s[-1]) for r,s in scores if s[-1] <= resources]}')
             best_plan = max(scores, key=lambda score: score[1][0])
             repr, (score, components, time_total, used_this_time) = best_plan
 
@@ -526,25 +504,29 @@ class SchedulerImpl(Module, Scheduler):
             used = used_this_time
             t = time_total
             steps += 1
-            #self.log.info(f'@end{steps=}: {[p for p,_ in plan]}, {score=}, {components=}, {time_total=}, {used_this_time=}')
         
-        self.log.info(t)
-        self.log.info(f'{plan=}')
         download_plan = [{0: idx} for idx,repr in plan]
         self.log.info(f'greedy: {download_plan=}')
-        self.log.info(f'overshoot: {used-resources}')
         return download_plan
     
     async def symmetric_search(self, event):
         pass
 
+    async def get_download_plan(self, prediction: Prediction):
+        return await self.search(prediction)
+
     async def handle_message(self, message):
+        ''' This exists to be a callback for the  MessageProcessor.
+        '''
         prefix = message.split()[0]
-        self.log.info(f'handle_event: {message=}, {prefix=}')
 
         if prefix == 'evs':
-            self.log.info(f'handle_event: event notif: {message=}, {prefix=}')
-            self.notification = Prediction.load_from_string(message.split()[1])
+            try:
+                self.notification = Prediction.load_from_string(message.split()[1])
+                self.log.info(f'handle_event: Event notification: {self.notification=}')
+            except:
+                self.log.info(f'handle_event: Malformed event notification: {message=}')
+
             for listener in self.listeners:
                 await listener.on_notification_received(message)
 
@@ -557,6 +539,9 @@ class SchedulerImpl(Module, Scheduler):
             self.log.info('handle_event: stop')
             for listener in self.listeners:
                 await listener.on_notification_received(prefix)
+        else:
+            self.log.info(f'handle_event: Unrecognized message prefix. {message=}')
+
         
 class MessageProcessor:
     def __init__(self, zmq_context, zmq_socket, worker_count=8, log=None):
