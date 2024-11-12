@@ -124,9 +124,7 @@ class PlayerConfig:
     mod_analyzer: list[str] = field(default_factory=lambda: ["data_collector"])
 
     # Buffer Configuration
-    # Buffer duration must be 1 segment length behind the live edge.
-    # e.g. buffer_duration == 3 means a live edge of 4 seconds.
-    buffer_duration: float = 1.5 - 0.5
+    buffer_duration: float = 5.0
     safe_buffer_level: float = 1.0
     panic_buffer_level: float = 0.5
     min_rebuffer_duration: float = 1
@@ -141,7 +139,7 @@ class PlayerConfig:
 
     #predicted_events: List[Prediction] = []
 
-    initial_buffer = 0.5 + 0.5
+    initial_buffer = 5.0
     initial_quality = 4
 
     search_method = 'exhaustive'

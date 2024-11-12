@@ -182,7 +182,7 @@ class PlayerComposer:
             "--max_buffer",
             help="Maximum buffer size in seconds. Note: With the way iStream player currently works, you need this to be set one segment length shorter than you actually want it.",
             type=float,
-            default=1.0
+            default=5.0
         )
         parser.add_argument(
             '--search_method',

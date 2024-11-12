@@ -1,11 +1,8 @@
 import asyncio
 import itertools
 import logging
-import json
 import zmq
 import math
-
-import threading
 
 from time import sleep
 
@@ -214,6 +211,7 @@ class SchedulerImpl(Module, Scheduler):
                         # No more segments left
                         self.log.info("No more segments left")
                         self._end = True
+                        await self.notification_worker.stop()
                         return
 
                     # Download one segment from each adaptation set
@@ -243,6 +241,7 @@ class SchedulerImpl(Module, Scheduler):
                         except IndexError:
                             self.log.info("Segments ended")
                             self._end = True
+                            await self.notification_worker.stop()
                             return
                         urls.append(segment.url)
 
@@ -255,6 +254,7 @@ class SchedulerImpl(Module, Scheduler):
                         # Result is None means the stream got dropped
                         self._dropped_index = self._index
                         continue
+
                     download_stats = {as_id: self.bandwidth_meter.get_stats(segment.url) for as_id, segment in segments.items()}
                     for listener in self.listeners:
                         await listener.on_segment_download_complete(self._index, segments, download_stats)
@@ -310,6 +310,7 @@ class SchedulerImpl(Module, Scheduler):
                     # No more segments left
                     self.log.info("No more segments left")
                     self._end = True
+                    await self.notification_worker.stop()
                     return
 
                 # Download one segment from each adaptation set
@@ -339,6 +340,7 @@ class SchedulerImpl(Module, Scheduler):
                     except IndexError:
                         self.log.info("Segments ended")
                         self._end = True
+                        await self.notification_worker.stop()
                         return
                     urls.append(segment.url)
 
@@ -368,6 +370,8 @@ class SchedulerImpl(Module, Scheduler):
         await self.download_manager.close()
         if self._task is not None:
             self._task.cancel()
+
+        await self.notification_worker.stop()
 
     @property
     def is_end(self):
@@ -443,7 +447,7 @@ class SchedulerImpl(Module, Scheduler):
             buffer_level += 0.5
             buffer_levels.append(buffer_level)
 
-            if buffer_level > self.max_buffer_duration:
+            if buffer_level >= self.max_buffer_duration:
                 wait_time += buffer_level - self.max_buffer_duration
                 t += buffer_level - self.max_buffer_duration
                 buffer_level = self.max_buffer_duration
@@ -559,17 +563,21 @@ class MessageProcessor:
     async def __zmq_reader_task__(self):
         if self.log:
             self.log.info('started reader task')
-        while not self._shutdown:
 
-            message = await asyncio.to_thread(self.zmq_socket.recv_string)
-            # could avoid the overhead of try/catch but eh. we're talking like 2ms
+        self.zmq_socket.RCVTIMEO = 100
+        while not self._shutdown:
+            try:
+                message = await asyncio.to_thread(self.zmq_socket.recv_string)
+            except zmq.Again:
+                continue
+
             try:
                 if self.log:
                     self.log.info('enqueue')
                 self.queue.put_nowait(message)
             except asyncio.CancelledError:
                 if self.log:
-                    self.log.info('enqueue: canceled?')
+                    self.log.info('enqueue: canceled')
                 break
             except Exception:
                 if self.log:
@@ -624,7 +632,9 @@ class MessageProcessor:
         self._shutdown = True
         self.zmq_socket.close()
         self._zmq_read_task.cancel()
+
         for worker in self.workers:
             worker.cancel()
+
         await asyncio.gather(*self.workers, return_exceptions=True)        
         await self.queue.join()
