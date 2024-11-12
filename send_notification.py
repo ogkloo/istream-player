@@ -5,7 +5,7 @@ from time import sleep
 
 def send_action(action, port):
     ctx = zmq.Context()
-    publisher = ctx.socket(zmq.PUB)
+    publisher = ctx.socket(zmq.PUSH)
     publisher.bind(f"tcp://127.0.0.1:{port}")
 
     #sleep(0.1)
@@ -13,7 +13,7 @@ def send_action(action, port):
 
 def main(msg, timeout, port, ack_port):
     ctx = zmq.Context()
-    publisher = ctx.socket(zmq.PUB)
+    publisher = ctx.socket(zmq.PUSH)
     publisher.bind(f"tcp://127.0.0.1:{port}")
 
     sleep(0.1)

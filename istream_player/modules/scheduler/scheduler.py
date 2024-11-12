@@ -108,15 +108,12 @@ class SchedulerImpl(Module, Scheduler):
 
         try:
             self.context = zmq.Context()
-            self.receiver = self.context.socket(zmq.SUB)
+            self.receiver = self.context.socket(zmq.PULL)
             self.receiver.connect(f"tcp://localhost:{RECV_PORT}")
-            self.receiver.setsockopt_string(zmq.SUBSCRIBE, "evs")
-            self.receiver.setsockopt_string(zmq.SUBSCRIBE, "start")
-            self.receiver.setsockopt_string(zmq.SUBSCRIBE, "stop")
         except:
             raise Exception('zmq error')
 
-        self.notification_worker = MessageProcessor(self.context, self.receiver, 8, self.log)
+        self.notification_worker = MessageProcessor(self.context, self.receiver, 1, self.log)
         self.notification_worker.register_callback(self.handle_message)
 
         self.notification = None
