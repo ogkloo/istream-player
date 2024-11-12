@@ -8,7 +8,7 @@ def send_action(action, port):
     publisher = ctx.socket(zmq.PUB)
     publisher.bind(f"tcp://127.0.0.1:{port}")
 
-    sleep(0.5)
+    #sleep(0.1)
     publisher.send_string(f'{action} now')
 
 def main(msg, timeout, port, ack_port):
@@ -16,36 +16,10 @@ def main(msg, timeout, port, ack_port):
     publisher = ctx.socket(zmq.PUB)
     publisher.bind(f"tcp://127.0.0.1:{port}")
 
-    ack_recvr = ctx.socket(zmq.SUB)
-    ack_recvr.connect(f"tcp://127.0.0.1:{ack_port}")
-    ack_recvr.setsockopt_string(zmq.SUBSCRIBE, "ack")
-
-
     sleep(0.1)
     publisher.send_string(f"evs {msg}")
 
-    if timeout < 0:
-        print("Sent. Waiting...")
-        resend_attempts = 0
-        sleep(0.5)
-        while resend_attempts < timeout:
-            try:
-                ack = ack_recvr.recv_string(flags=zmq.NOBLOCK)
-                print(f"Got ack {ack}")
-                publisher.close()
-                ack_recvr.close()
-                ctx.term()
-                return
-            except zmq.Again:
-                print("Resending")
-                sleep(0.5)
-                publisher.send_string(f"evs {msg}")
-            resend_attempts += 1
-
-        print("connection timed out")
-
     publisher.close()
-    ack_recvr.close()
     ctx.term()
 
 

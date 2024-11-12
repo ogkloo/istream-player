@@ -115,12 +115,12 @@ class SchedulerImpl(Module, Scheduler):
             self.receiver.setsockopt_string(zmq.SUBSCRIBE, "stop")
         except:
             raise Exception('zmq error')
-        
+
+        self.notification_worker = MessageProcessor(self.context, self.receiver, 8, self.log)
+        self.notification_worker.register_callback(self.handle_message)
+
         self.notification = None
-
-        # self.sender = self.context.socket(zmq.PUB)
-        # self.sender.bind(f"tcp://localhost:{ACK_PORT}")
-
+        
         select_as = config.select_as.split("-")
         if len(select_as) == 1 and select_as[0].isdecimal():
             self.selected_as_start = int(select_as[0])
@@ -152,18 +152,21 @@ class SchedulerImpl(Module, Scheduler):
         self.adaptation_sets = self.select_adaptation_sets(self.mpd_provider.mpd.adaptation_sets)
         # print(f"{self.adaptation_sets=}")
 
+        self.log.info('before worker start')
+        self.notification_worker.start()
+        self.log.info('after worker start')
+
         # Start from the min segment index
         self._index = self.segment_limits(self.adaptation_sets)[0]
 
         notification_received = False
 
-        #await self.start_notifications_checker()
-
         # Called as often as possible
         while True:
             # Check buffer level
             #notification = await self.check_messages()
-            notification = await self.check_messages()
+            notification = self.notification
+
             if notification is not None:
                 self.log.info(f'Received {notification=} @ {self.buffer_manager.buffer_level}, {self._index=}')
                 notification_received = True
@@ -172,9 +175,12 @@ class SchedulerImpl(Module, Scheduler):
             # Notifications are sent via ZeroMQ. To send a notification, use the associated send_notification.py
             # script, or send a message to localhost:5555 containing the JSON of the event.
             if notification is not None:
-                notification = ' '.join(notification.split()[1:])
-                self.log.info(f'processing {notification=}')
-                prediction = Prediction.load_from_string(notification)
+                #notification = ' '.join(notification.split()[1:])
+                #self.log.info(f'processing {notification=}')
+                #prediction = Prediction.load_from_string(notification)
+
+                self.log.info('hmmmm')
+                prediction = self.notification
 
                 # TODO: Refactor into a function which returns the download plan in the current format
                 # Warning: Bad code ahead. *2 shouldn't really be here, it's there bc we have 1/2s segment sizes.
@@ -270,9 +276,6 @@ class SchedulerImpl(Module, Scheduler):
                     self._index += 1
                     await self.buffer_manager.enqueue_buffer(segments)
                 
-                # Reset
-                self.notification = None
-
             else:
                 self.log.info("No notification")
 
@@ -435,7 +438,6 @@ class SchedulerImpl(Module, Scheduler):
         # Convenience
         s = self.settings
         qualities = [r[1].bandwidth for r in plan]
-        self.log.info(f'qualities: {[quality/(2000*1000) for quality in qualities]}')
         switches = self.switch_score(qualities)
         stall_time = 0
         wait_time = 0
@@ -519,7 +521,7 @@ class SchedulerImpl(Module, Scheduler):
                 done = True
                 continue
 
-            self.log.info(f'{[(s[0],s[-1]) for r,s in scores if s[-1] <= resources]}')
+            #self.log.info(f'{[(s[0],s[-1]) for r,s in scores if s[-1] <= resources]}')
             best_plan = max(scores, key=lambda score: score[1][0])
             repr, (score, components, time_total, used_this_time) = best_plan
 
@@ -527,7 +529,7 @@ class SchedulerImpl(Module, Scheduler):
             used = used_this_time
             t = time_total
             steps += 1
-            self.log.info(f'@end{steps=}: {[p for p,_ in plan]}, {score=}, {components=}, {time_total=}, {used_this_time=}')
+            #self.log.info(f'@end{steps=}: {[p for p,_ in plan]}, {score=}, {components=}, {time_total=}, {used_this_time=}')
         
         self.log.info(t)
         self.log.info(f'{plan=}')
@@ -539,62 +541,28 @@ class SchedulerImpl(Module, Scheduler):
     async def symmetric_search(self, event):
         pass
 
-    async def start_notifications_checker(self):
-        async def notification_worker():
-            self.log.info(f'started notification worker')
-            while True:
-                message = self.receiver.recv_string()
-                self.log.info(f'got it: {message}')
-                self.notification = await self.parse_message(message)
-        
-        thread = threading.Thread(target=notification_worker)
-        thread.start()
-    
-    async def parse_message(self, message):
+    async def handle_message(self, message):
         prefix = message.split()[0]
+        self.log.info(f'handle_event: {message=}, {prefix=}')
+
         if prefix == 'evs':
+            self.log.info(f'handle_event: event notif: {message=}, {prefix=}')
+            self.notification = Prediction.load_from_string(message.split()[1])
             for listener in self.listeners:
                 await listener.on_notification_received(message)
-            return message
+
         elif prefix == 'start':
-            self.log.info(f'EVENT_START')
+            self.log.info('handle_event: start')
             for listener in self.listeners:
                 await listener.on_notification_received(prefix)
-            return None
+
         elif prefix == 'stop':
+            self.log.info('handle_event: stop')
             for listener in self.listeners:
                 await listener.on_notification_received(prefix)
-            return None
-
         
-    async def check_messages(self):
-        message = None
-        try:
-            message = self.receiver.recv_string(flags=zmq.NOBLOCK)
-            self.log.info(f'message received, {message=}')
-            prefix = message.split()[0]
-            if prefix == 'evs':
-                for listener in self.listeners:
-                    await listener.on_notification_received(message)
-                return message
-            elif prefix == 'start':
-                self.log.info(f'EVENT_START')
-                for listener in self.listeners:
-                    await listener.on_notification_received(prefix)
-                return None
-            elif prefix == 'stop':
-                for listener in self.listeners:
-                    await listener.on_notification_received(prefix)
-                return None
-        except zmq.Again:
-            # No message, continue with other tasks
-            #self.log.info(f'no message received, continuing')
-            return None
-
-import asyncio
-
 class MessageProcessor:
-    def __init__(self, zmq_context, zmq_socket, worker_count=8):
+    def __init__(self, zmq_context, zmq_socket, worker_count=8, log=None):
         self.zmq_context = zmq_context
         self.zmq_socket = zmq_socket
         self.queue = asyncio.Queue(0) # unlimited queue works
@@ -603,16 +571,27 @@ class MessageProcessor:
         self.callbacks = []
         self.workers = []
         self.worker_count = worker_count
+
+        self.log = log
     
-    def __zmq_reader_task__(self):
+    async def __zmq_reader_task__(self):
+        if self.log:
+            self.log.info('started reader task')
         while not self._shutdown:
-            message = self.zmq_socket.recv()
+
+            message = await asyncio.to_thread(self.zmq_socket.recv_string)
             # could avoid the overhead of try/catch but eh. we're talking like 2ms
             try:
+                if self.log:
+                    self.log.info('enqueue')
                 self.queue.put_nowait(message)
             except asyncio.CancelledError:
+                if self.log:
+                    self.log.info('enqueue: canceled?')
                 break
             except Exception:
+                if self.log:
+                    self.log.info('enqueue: fucked')
                 pass
 
     async def __worker_task(self, worker_id):
@@ -622,6 +601,8 @@ class MessageProcessor:
                 for callback in self.callbacks:
                     try:
                         if asyncio.iscoroutinefunction(callback):
+                            if self.log:
+                                self.log.info('callback (coroutine)')
                             await callback(message)
                         else:
                             # handle sync things
@@ -636,16 +617,26 @@ class MessageProcessor:
 
     def start(self):
         self._shutdown = False
+        if self.log:
+            self.log.info('creating task')
         self._zmq_read_task = asyncio.create_task(self.__zmq_reader_task__())
+
+        if self.log:
+            self.log.info('created task')
 
         for i in range(self.worker_count):
             worker = asyncio.create_task(self.__worker_task(worker_id=i))
             self.workers.append(worker)
+        
+        if self.log:
+            self.log.info('finished start task')
             
     def register_callback(self, func):
         if not callable(func):
             raise ValueError("idiot")
         self.callbacks.append(func)
+        if self.log:
+            self.log.info('registered callback')
 
     async def stop(self):
         self._shutdown = True
