@@ -79,6 +79,11 @@ def main():
     
     if args["initial_quality"] is not None:
         config.initial_quality = args["initial_quality"]
+    
+    if args["initial_buffer"] is not None:
+        config.buffer_duration = args["initial_buffer"]
+    
+    config.search_method = args['search_method']
 
     # Then override from arguments
     load_from_dict(args, config)

@@ -13,7 +13,7 @@ from matplotlib.patches import Rectangle
 
 import matplotlib.pyplot as plt
 
-from istream_player.config.config import PlayerConfig
+from istream_player.config.config import PlayerConfig, Prediction
 from istream_player.core.analyzer import Analyzer
 from istream_player.core.buffer import BufferEventListener, BufferManager
 from istream_player.core.bw_meter import (
@@ -98,6 +98,7 @@ class PlaybackAnalyzer(
         self._throughputs: List[Tuple[float, int]] = []
         self._cont_bw: List[Tuple[float, int]] = []
         self._states: List[Tuple[float, State, float]] = []
+        self._notifications: List[Prediction] = []
         self._segments_by_url: Dict[str, AnalyzerSegment] = {}
         self._position = 0
         self._stalls: List[Stall] = []
@@ -167,6 +168,12 @@ class PlaybackAnalyzer(
     async def on_buffer_level_change(self, buffer_level):
         self._buffer_levels.append(
             BufferLevel(self._seconds_since(self._start_time), buffer_level)
+        )
+    
+    async def on_notification_received(self, notification):
+        self._notifications.append(
+            {'time': self._seconds_since(self._start_time), 
+             'notification': notification}
         )
 
     async def on_segment_download_start(
@@ -333,6 +340,7 @@ class PlaybackAnalyzer(
                 {"time": bw[0], "bandwidth": bw[1]} for bw in cont_bw
             ],
             "buffer_level": list(map(asdict, self._buffer_levels)),
+            "notifications": self._notifications,
         }
 
         if self.dump_results_path is not None:
@@ -341,6 +349,7 @@ class PlaybackAnalyzer(
             d = {
                 "buffer_level": data["buffer_level"],
                 "segments": data["segments"],
+                "notifications": data["notifications"],
             }
             json.dump(d, sys.stdout, indent=4)
 

@@ -30,18 +30,28 @@ class Prediction():
         m = map(float, message.split(','))
         return cls(*list(m))
     
-    def download_time(self, file_size, t):
+    def download_time(self, file_size, t, log=None):
+        if log:
+            log.info(f'{file_size=}, {t=}, {self.time_to_event * self.bw_old}')
         if t < self.time_to_event:
-            if file_size < self.time_to_event * self.bw_old:
+            if file_size < (self.time_to_event-t) * self.bw_old:
+                if log:
+                    log.info(f'finish before event: {file_size=}, {(self.time_to_event-t) * self.bw_old}')
                 return file_size/(self.bw_old)
             else:
                 #if file_size < (self.time_to_event * self.bw_old) + (self.last_valid_duration * self.bw_new):
-                return (file_size-(self.time_to_event * self.bw_old))/(self.bw_new) + self.duration
+                if log:
+                    log.info(f'after event: {(file_size-((self.time_to_event-t) * self.bw_old))/(self.bw_new) + self.duration}')
+
+                return (file_size-((self.time_to_event-t) * self.bw_old))/(self.bw_new) + self.duration
         elif t < self.time_to_event + self.duration:
             time_in_outage = (self.time_to_event + self.duration) - t
             return file_size/(self.bw_new) + time_in_outage
         else:
             return file_size/(self.bw_new)
+    
+    def total_resources(self):
+        return self.time_to_event * self.bw_old + self.last_valid_duration * self.bw_new
 
 
 class StaticConfig(object):
@@ -133,6 +143,8 @@ class PlayerConfig:
 
     initial_buffer = 0.5 + 0.5
     initial_quality = 4
+
+    search_method = 'exhaustive'
 
     def validate(self) -> None:
         """Assert if config properties are set properly"""

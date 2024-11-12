@@ -32,6 +32,9 @@ class SchedulerEventListener(ABC):
         """
         pass
 
+    async def on_notification_received(self, notification):
+        pass
+
 
 class Scheduler(ModuleInterface, ABC):
     def __init__(self) -> None:

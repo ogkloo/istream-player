@@ -5,6 +5,8 @@ import json
 import zmq
 import math
 
+import threading
+
 from time import sleep
 
 from asyncio import Task
@@ -54,11 +56,10 @@ class Settings():
 class SchedulerImpl(Module, Scheduler):
     log = logging.getLogger("SchedulerImpl")
     # TODO: Load this from config or whatever
-    settings = Settings(1, 5, 20, 20, lambda x: x**2, math.log)
+    settings = Settings(1, 5, 20, 0, lambda x: x**2, math.log)
 
     # Before the notification comes, we need to focus on 
     # exactly meeting our initial conditions.
-    notification_received = False
 
     def __init__(self):
         super().__init__()
@@ -97,13 +98,25 @@ class SchedulerImpl(Module, Scheduler):
         # But right now since I'm using them they're baked in
         self.initial_buffer = config.initial_buffer
 
+        # Configure mitigation strategy
+        if config.search_method == 'exhaustive':
+            self.search = self.exhaustive_search
+        elif config.search_method == 'greedy':
+            self.search = self.greedy_search
+        elif config.search_method == 'symmetric':
+            self.search = self.symmetric_search
+
         try:
             self.context = zmq.Context()
             self.receiver = self.context.socket(zmq.SUB)
             self.receiver.connect(f"tcp://localhost:{RECV_PORT}")
-            self.receiver.setsockopt_string(zmq.SUBSCRIBE, "")
+            self.receiver.setsockopt_string(zmq.SUBSCRIBE, "evs")
+            self.receiver.setsockopt_string(zmq.SUBSCRIBE, "start")
+            self.receiver.setsockopt_string(zmq.SUBSCRIBE, "stop")
         except:
             raise Exception('zmq error')
+        
+        self.notification = None
 
         # self.sender = self.context.socket(zmq.PUB)
         # self.sender.bind(f"tcp://localhost:{ACK_PORT}")
@@ -132,28 +145,6 @@ class SchedulerImpl(Module, Scheduler):
         # print(adap_sets, ids)
         return min(ids), max(ids)
 
-    def quantize(self, download_plan):
-        quantized_bws = []
-        for download in download_plan:
-            quantized_download = {}
-            for (adaptation_set_id, ideal_bandwidth) in download.items():
-                adaptation_set = self.adaptation_sets[adaptation_set_id]
-                representations = adaptation_set.representations
-                representations = sorted(representations.items(), key=lambda r: r[1].bandwidth)
-
-                # Find ~acceptable bitrate
-                self.log.info(f'{representations=}')
-                for r in representations:
-                    self.log.info(f'{r=}')
-                for representation_id, representation in representations:
-                    self.log.info(f'{representation_id=}: {representation.bandwidth=}, {ideal_bandwidth=}')
-                    if representation.bandwidth > ideal_bandwidth:
-                        quantized_download[adaptation_set_id] = representation_id
-                        break
-
-                quantized_bws.append(quantized_download)
-        return quantized_bws
-
     @critical_task()
     async def run(self):
         await self.mpd_provider.available()
@@ -166,15 +157,16 @@ class SchedulerImpl(Module, Scheduler):
 
         notification_received = False
 
+        #await self.start_notifications_checker()
+
         # Called as often as possible
         while True:
             # Check buffer level
+            #notification = await self.check_messages()
             notification = await self.check_messages()
             if notification is not None:
                 self.log.info(f'Received {notification=} @ {self.buffer_manager.buffer_level}, {self._index=}')
                 notification_received = True
-
-
 
             # Check predictions.
             # Notifications are sent via ZeroMQ. To send a notification, use the associated send_notification.py
@@ -184,25 +176,40 @@ class SchedulerImpl(Module, Scheduler):
                 self.log.info(f'processing {notification=}')
                 prediction = Prediction.load_from_string(notification)
 
+                # TODO: Refactor into a function which returns the download plan in the current format
                 # Warning: Bad code ahead. *2 shouldn't really be here, it's there bc we have 1/2s segment sizes.
-                max_K = math.ceil((prediction.time_to_event + prediction.duration + prediction.last_valid_duration) * 2)
-                self.log.info(f'{max_K=}')
-                adaptation_set = self.adaptation_sets[0]
-                representations = adaptation_set.representations
-                representations = sorted(representations.items(), key=lambda r: r[1].bandwidth)
-                scored_plans = []
-                self.log.info('started scoring')
-                for plan in all_products(representations, max_K):
-                    plan_score = await self.score(prediction, plan)
-                    scored_plans.append((plan_score, plan))
-                
-                best_plan = max(scored_plans, key=lambda x: x[0])
-                download_plan = [{0: idx} for idx,repr in best_plan[-1]]
-                self.log.info(f'finished scoring, {download_plan=}, {best_plan=}')
+
+                download_plan = await self.search(prediction)
 
                 # Download each segment one after another and don't screw up stateful variables
                 for selections in download_plan:
                     self.log.info(f'{selections=}')
+
+                    self.log.info(f'{self.buffer_manager.buffer_level=}')
+                    # We don't need the other if/else block here bc we know that there's a notification
+                    while self.buffer_manager.buffer_level > self.max_buffer_duration:
+                        await asyncio.sleep(self.time_factor * self.update_interval)
+
+                    assert self.mpd_provider.mpd is not None
+                    if self.mpd_provider.mpd.type == "dynamic":
+                        await self.mpd_provider.update()
+                        self.adaptation_sets = self.select_adaptation_sets(self.mpd_provider.mpd.adaptation_sets)
+
+                    # last_segment = max(self.adaptation_sets[0].representations[0].segments.keys())
+                    # first_segment = min(self.adaptation_sets[0].representations[0].segments.keys())
+                    first_segment, last_segment = self.segment_limits(self.adaptation_sets)
+                    self.log.info(f"{first_segment=}, {last_segment=}")
+
+                    if self._index < first_segment:
+                        self.log.info(f"Segment {self._index} not in mpd, Moving to next segment")
+                        self._index += 1
+                        continue
+
+                    if self.mpd_provider.mpd.type == "dynamic" and self._index > last_segment:
+                        self.log.info(f"Waiting for more segments in mpd : {self.mpd_provider.mpd.type}")
+                        await asyncio.sleep(self.time_factor * self.update_interval)
+                        continue
+                
                     # All adaptation sets take the current bandwidth
                     adap_bw = {as_id: self.bandwidth_meter.bandwidth for as_id in selections.keys()}
 
@@ -262,6 +269,9 @@ class SchedulerImpl(Module, Scheduler):
                         await listener.on_segment_download_complete(self._index, segments, download_stats)
                     self._index += 1
                     await self.buffer_manager.enqueue_buffer(segments)
+                
+                # Reset
+                self.notification = None
 
             else:
                 self.log.info("No notification")
@@ -425,49 +435,223 @@ class SchedulerImpl(Module, Scheduler):
         # Convenience
         s = self.settings
         qualities = [r[1].bandwidth for r in plan]
+        self.log.info(f'qualities: {[quality/(2000*1000) for quality in qualities]}')
         switches = self.switch_score(qualities)
         stall_time = 0
         wait_time = 0
 
         # self.max_buffer_duration
         t = 0
+        resources = 0
+        buffer_levels = []
         buffer_level = self.buffer_manager.buffer_level
+        buffer_levels.append(buffer_level)
         for segment in qualities:
             # TODO: segment -> segment.filesize or whatever
             dl_time = event.download_time(segment/(2*1000*1000), t)
+            resources += segment/2
             t += dl_time
             buffer_level = buffer_level - dl_time
             if buffer_level < 0:
                 stall_time -= buffer_level
                 buffer_level = 0
+
             # TODO: Get segment size correctly through buffer manager or whatever
             buffer_level += 0.5
+            buffer_levels.append(buffer_level)
+
             if buffer_level > self.max_buffer_duration:
                 wait_time += buffer_level - self.max_buffer_duration
                 t += buffer_level - self.max_buffer_duration
                 buffer_level = self.max_buffer_duration
 
-            if [r[0] for r in plan] == [5,5,5,5,5]:
-                self.log.info(f'{plan=}, {qualities=}')
-                self.log.info(f'{t=}, {stall_time=}, {buffer_level=}, {wait_time=}, {dl_time=}')
-
-
         components = (sum(map(s.q, qualities)), sum(switches), stall_time, wait_time)
-        if [r[0] for r in plan] == [5,5,5,5,5]:
-            self.log.info(f'{components=}')
-            #exit()
 
         # TODO: Less stupid way of doing this, like make w a numpy vector
         score = s.w1 * components[0] - s.w2 * components[1] - s.w3 * components[2] - s.w4 * components[3] 
-        return (score, components, plan)
+        return (score, components, t, resources)
 
+    async def exhaustive_search(self, prediction: Prediction):
+        max_K = math.ceil((prediction.time_to_event + prediction.duration + prediction.last_valid_duration) * 2)
+        self.log.info(f'{max_K=}')
+        adaptation_set = self.adaptation_sets[0]
+        representations = adaptation_set.representations
+        representations = sorted(representations.items(), key=lambda r: r[1].bandwidth)
+        scored_plans = []
+        self.log.info('started scoring')
+        for plan in all_products(representations, max_K):
+            plan_score = await self.score(prediction, plan)
+            #if plan_score[2] <= (prediction.time_to_event + prediction.duration + prediction.last_valid_duration):
+            if plan_score[-1]/(1000*1000) <= prediction.total_resources():
+                scored_plans.append((plan_score, plan))
+        
+        best_plan = max(scored_plans, key=lambda x: x[0][0])
+        self.log.info(f'{best_plan[0][0]=}, {best_plan[0]}')
+        best_plan_score, _ = best_plan
+
+        self.log.info(f'overshoot: {best_plan_score[-1]/(1000*1000) - prediction.total_resources()}')
+        self.log.info(f'Plan score: {best_plan_score}')
+        download_plan = [{0: idx} for idx,repr in best_plan[-1]]
+        self.log.info(f'finished scoring, {download_plan=}, {best_plan=}')
+        return download_plan
+    
+    async def greedy_search(self, prediction: Prediction):
+        resources = prediction.total_resources()*(1000*1000)
+        self.log.info(f'{resources=}')
+        adaptation_set = self.adaptation_sets[0]
+        representations = adaptation_set.representations
+        representations = sorted(representations.items(), key=lambda r: r[1].bandwidth)
+
+        used = 0
+        plan = []
+        t = 0
+
+        steps = 0
+
+        done = False
+
+        while not done:
+            self.log.info(f'@start{steps=}: {[p for p,_ in plan]}')
+            scores = [(representation, await self.score(prediction, plan + [representation])) for representation in representations]
+            scores = [(r,s) for r,s in scores if s[-1] <= resources]
+
+            if scores == []:
+                done = True
+                continue
+
+            self.log.info(f'{[(s[0],s[-1]) for r,s in scores if s[-1] <= resources]}')
+            best_plan = max(scores, key=lambda score: score[1][0])
+            repr, (score, components, time_total, used_this_time) = best_plan
+
+            plan.append(repr)
+            used = used_this_time
+            t = time_total
+            steps += 1
+            self.log.info(f'@end{steps=}: {[p for p,_ in plan]}, {score=}, {components=}, {time_total=}, {used_this_time=}')
+        
+        self.log.info(t)
+        self.log.info(f'{plan=}')
+        download_plan = [{0: idx} for idx,repr in plan]
+        self.log.info(f'greedy: {download_plan=}')
+        self.log.info(f'overshoot: {used-resources}')
+        return download_plan
+    
+    async def symmetric_search(self, event):
+        pass
+
+    async def start_notifications_checker(self):
+        async def notification_worker():
+            self.log.info(f'started notification worker')
+            while True:
+                message = self.receiver.recv_string()
+                self.log.info(f'got it: {message}')
+                self.notification = await self.parse_message(message)
+        
+        thread = threading.Thread(target=notification_worker)
+        thread.start()
+    
+    async def parse_message(self, message):
+        prefix = message.split()[0]
+        if prefix == 'evs':
+            for listener in self.listeners:
+                await listener.on_notification_received(message)
+            return message
+        elif prefix == 'start':
+            self.log.info(f'EVENT_START')
+            for listener in self.listeners:
+                await listener.on_notification_received(prefix)
+            return None
+        elif prefix == 'stop':
+            for listener in self.listeners:
+                await listener.on_notification_received(prefix)
+            return None
+
+        
     async def check_messages(self):
         message = None
         try:
             message = self.receiver.recv_string(flags=zmq.NOBLOCK)
             self.log.info(f'message received, {message=}')
-            return message
+            prefix = message.split()[0]
+            if prefix == 'evs':
+                for listener in self.listeners:
+                    await listener.on_notification_received(message)
+                return message
+            elif prefix == 'start':
+                self.log.info(f'EVENT_START')
+                for listener in self.listeners:
+                    await listener.on_notification_received(prefix)
+                return None
+            elif prefix == 'stop':
+                for listener in self.listeners:
+                    await listener.on_notification_received(prefix)
+                return None
         except zmq.Again:
             # No message, continue with other tasks
             #self.log.info(f'no message received, continuing')
             return None
+
+import asyncio
+
+class MessageProcessor:
+    def __init__(self, zmq_context, zmq_socket, worker_count=8):
+        self.zmq_context = zmq_context
+        self.zmq_socket = zmq_socket
+        self.queue = asyncio.Queue(0) # unlimited queue works
+        self._shutdown = False
+        self._zmq_read_task = None
+        self.callbacks = []
+        self.workers = []
+        self.worker_count = worker_count
+    
+    def __zmq_reader_task__(self):
+        while not self._shutdown:
+            message = self.zmq_socket.recv()
+            # could avoid the overhead of try/catch but eh. we're talking like 2ms
+            try:
+                self.queue.put_nowait(message)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
+    async def __worker_task(self, worker_id):
+        while not self._shutdown:
+            try:
+                message = await self.queue.get()
+                for callback in self.callbacks:
+                    try:
+                        if asyncio.iscoroutinefunction(callback):
+                            await callback(message)
+                        else:
+                            # handle sync things
+                            await asyncio.get_event_loop().run_in_executor(None, callback, message)
+                    except Exception as e:
+                        print("Callback failed: ", e)
+                self.queue.task_done()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"UH OH!!! {worker_id} fucked: {e}")
+
+    def start(self):
+        self._shutdown = False
+        self._zmq_read_task = asyncio.create_task(self.__zmq_reader_task__())
+
+        for i in range(self.worker_count):
+            worker = asyncio.create_task(self.__worker_task(worker_id=i))
+            self.workers.append(worker)
+            
+    def register_callback(self, func):
+        if not callable(func):
+            raise ValueError("idiot")
+        self.callbacks.append(func)
+
+    async def stop(self):
+        self._shutdown = True
+        self.zmq_socket.close()
+        self._zmq_read_task.cancel()
+        for worker in self.workers:
+            worker.cancel()
+        await asyncio.gather(*self.workers, return_exceptions=True)        
+        await self.queue.join()
