@@ -16,7 +16,6 @@ def main(msg, timeout, port, ack_port):
     publisher = ctx.socket(zmq.PUSH)
     publisher.bind(f"tcp://127.0.0.1:{port}")
 
-    sleep(0.1)
     publisher.send_string(f"evs {msg}")
 
     publisher.close()
