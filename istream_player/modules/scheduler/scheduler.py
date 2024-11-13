@@ -260,6 +260,9 @@ class SchedulerImpl(Module, Scheduler):
                         await listener.on_segment_download_complete(self._index, segments, download_stats)
                     self._index += 1
                     await self.buffer_manager.enqueue_buffer(segments)
+
+                    # Consume the notification
+                    self.notification = None
                 
             else:
                 # Original iStream Player code with some formatting changes
@@ -503,6 +506,7 @@ class SchedulerImpl(Module, Scheduler):
 
             best_plan = max(scores, key=lambda score: score[1][0])
             repr, (score, components, time_total, used_this_time) = best_plan
+            self.log.info(time_total)
 
             plan.append(repr)
             used = used_this_time
@@ -603,7 +607,7 @@ class MessageProcessor:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"UH OH!!! {worker_id} fucked: {e}")
+                print(f"worker error")
 
     def start(self):
         self._shutdown = False
@@ -629,9 +633,12 @@ class MessageProcessor:
             self.log.info('registered callback')
 
     async def stop(self):
+        if self.log:
+            self.log.info('Message Processor: Shutting down.')
         self._shutdown = True
-        self.zmq_socket.close()
         self._zmq_read_task.cancel()
+
+        #self.zmq_socket.close()
 
         for worker in self.workers:
             worker.cancel()
