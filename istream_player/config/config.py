@@ -4,13 +4,13 @@ from typing import Optional, List
 @dataclass
 class Prediction():
     # Bandwidth before event occurs
-    bw_old: int
+    bw_old: float
+
+    # Rate during mitigation
+    bw_outage: float
 
     # Bandwidth after event occurs
-    bw_new: int 
-
-    # This is time we use to set up initial conditions
-    #ready_time: float
+    bw_new: float
 
     # How long until event occurs
     time_to_event: float
@@ -30,23 +30,64 @@ class Prediction():
         m = map(float, message.split(','))
         return cls(*list(m))
     
-    def download_time(self, file_size, t, log=None):
+    def download_time(self, file_size: float, start_time: float) -> float:
+        """Calculate download time for a file of size `file_size` starting at `start_time`."""
+    
+        remaining_size = file_size # Convert file size to megabits (assuming file_size in MB)
+        elapsed_time = 0
+        
+        # Phase 1
+        phase_time = min(self.time_to_event - start_time, self.time_to_event)
+        phase_bw = self.bw_old
+        downloaded = phase_bw * phase_time
+        if downloaded >= remaining_size:
+            return elapsed_time + remaining_size / phase_bw  # Done in phase 1
+        remaining_size -= downloaded
+        elapsed_time += phase_time
+        
+        # Phase 2
+        phase_time = self.duration
+        phase_bw = self.bw_outage
+        downloaded = phase_bw * phase_time
+        if downloaded >= remaining_size:
+            return elapsed_time + remaining_size / phase_bw  # Done in phase 2
+        remaining_size -= downloaded
+        elapsed_time += phase_time
+        
+        # Phase 3 (constant bandwidth `bw3`)
+        phase_time = self.last_valid_duration
+        phase_bw = self.bw_new
+        elapsed_time += remaining_size / phase_bw
+        downloaded = phase_bw * phase_time
+        if downloaded >= remaining_size:
+            return elapsed_time + remaining_size / phase_bw  # Done in phase 2
+        remaining_size -= downloaded
+        elapsed_time += phase_time
+        
+        return elapsed_time
+    
+    def download_time2(self, file_size, t, log=None):
         if log:
             log.info(f'{file_size=}, {t=}, {self.time_to_event * self.bw_old}')
+
         if t < self.time_to_event:
             if file_size < (self.time_to_event-t) * self.bw_old:
                 if log:
                     log.info(f'finish before event: {file_size=}, {(self.time_to_event-t) * self.bw_old}')
+
                 return file_size/(self.bw_old)
+
             else:
                 #if file_size < (self.time_to_event * self.bw_old) + (self.last_valid_duration * self.bw_new):
                 if log:
                     log.info(f'after event: {(file_size-((self.time_to_event-t) * self.bw_old))/(self.bw_new) + self.duration}')
 
                 return (file_size-((self.time_to_event-t) * self.bw_old))/(self.bw_new) + self.duration
+
         elif t < self.time_to_event + self.duration:
             time_in_outage = (self.time_to_event + self.duration) - t
-            return file_size/(self.bw_new) + time_in_outage
+            resources_during_outage = time_in_outage*self.bw_outage
+
         else:
             return file_size/(self.bw_new)
     
