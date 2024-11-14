@@ -3,6 +3,8 @@ import logging
 import ssl
 from typing import Optional, Tuple
 
+import gc
+
 import aiohttp
 
 from istream_player.config.config import PlayerConfig
@@ -35,6 +37,11 @@ class TCPClientImpl(Module, DownloadManager):
 
     async def setup(self, config: PlayerConfig, **kwargs):
         self.ssl_keylog_file = config.ssl_keylog_file
+
+        # This option will aggressively remove old segments from memory, bringing memory usage 
+        # down to the cost of a single segment. With large videos (e.g. movies, VR videos, etc)
+        # this can save gb worth of memory.
+        self.aggressive_memory_management = config.aggressive_memory_management
 
     async def cleanup(self) -> None:
         await self.close()
@@ -116,6 +123,12 @@ class TCPClientImpl(Module, DownloadManager):
         for listener in self.listeners:
             await listener.on_transfer_end(len(self._content[url]), url)
 
+        if self.aggressive_memory_management:
+            for i_url, bytes in self._content.items():
+                if url != i_url:
+                    del bytes
+                    self._content[i_url] = None
+        
     async def _download_task(self):
         while True:
             self._is_busy = False
@@ -157,3 +170,4 @@ class TCPClientImpl(Module, DownloadManager):
         self._waiting_urls[url].set()
         for listener in self.listeners:
             await listener.on_transfer_end(len(self._content), url)
+        del self._content[url]

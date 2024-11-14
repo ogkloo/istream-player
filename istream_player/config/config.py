@@ -171,6 +171,8 @@ class PlayerConfig:
     min_rebuffer_duration: float = 1
     min_start_duration: float = 1
 
+    aggressive_memory_management = True
+
     select_as: str = "-"
 
     ssl_keylog_file: Optional[str] = None
