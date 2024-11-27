@@ -206,3 +206,5 @@ venv/
 dataset/
 runs/
 server
+
+env
