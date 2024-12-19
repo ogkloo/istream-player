@@ -12,6 +12,7 @@ from istream_player.modules.abr.abr_buffer import BufferABRController
 from istream_player.modules.abr.abr_dash import DashABRController
 from istream_player.modules.abr.abr_hybrid import HybridABRController
 from istream_player.modules.abr.abr_fixed import FixedABRController 
+from istream_player.modules.abr.abr_pensieve import PensieveABRController 
 
 # pd468 - add to Registerd Module Composer
 from istream_player.modules.abr.lolp_abrController import LolpABRController
@@ -324,6 +325,7 @@ class PlayerComposer:
                 HybridABRController,
                 LolpABRController,
                 FixedABRController,
+                PensieveABRController,
             ],
             single_initializer,
             "Adaptive Bitrate Controller",

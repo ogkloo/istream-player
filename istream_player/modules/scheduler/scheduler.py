@@ -4,13 +4,11 @@ import logging
 import zmq
 import math
 
-from time import sleep
-
 from asyncio import Task
-from typing import Dict, Optional, Set, Callable
+from typing import Dict, Optional, Set
 from dataclasses import dataclass
 
-from istream_player.config.config import (PlayerConfig, Prediction)
+from istream_player.config.config import (Settings, Prediction, PlayerConfig)
 from istream_player.core.abr import ABRController
 from istream_player.core.buffer import BufferManager
 from istream_player.core.bw_meter import BandwidthMeter
@@ -38,17 +36,9 @@ def all_products(A, K):
     )
 
 
-@dataclass
-class Settings():
-    w1: float
-    w2: float
-    w3: float
-    w4: float
-    p: Callable 
-    q: Callable
-
 @ModuleOption(
-    "scheduler", default=True, requires=["segment_downloader", BandwidthMeter, BufferManager, MPDProvider, ABRController]
+    "scheduler", default=True, 
+    requires=["segment_downloader", BandwidthMeter, BufferManager, MPDProvider, ABRController]
 )
 class SchedulerImpl(Module, Scheduler):
     log = logging.getLogger("SchedulerImpl")
@@ -94,6 +84,8 @@ class SchedulerImpl(Module, Scheduler):
         # These should default to None or something
         # But right now since I'm using them they're baked in
         self.initial_buffer = config.initial_buffer
+
+        self.use_pensieve = config.pensieve
 
         # Configure mitigation strategy
         if config.search_method == 'none':
@@ -263,7 +255,7 @@ class SchedulerImpl(Module, Scheduler):
 
                     # Consume the notification
                     self.notification = None
-                
+
             else:
                 # Original iStream Player code with some formatting changes
                 self.log.info("No notification")
@@ -361,6 +353,12 @@ class SchedulerImpl(Module, Scheduler):
                     await listener.on_segment_download_complete(self._index, segments, download_stats)
                 self._index += 1
                 await self.buffer_manager.enqueue_buffer(segments)
+
+            # Check if ABR strategy is Pensieve?
+            if self.use_pensieve:
+                for as_id, download_stat in download_stats.items():
+                    self.abr_controller.update_download_time(download_stat.stop_time - download_stat.start_time)
+                
 
     def select_adaptation_sets(self, adaptation_sets: Dict[int, AdaptationSet]):
         as_ids = adaptation_sets.keys()
@@ -517,8 +515,9 @@ class SchedulerImpl(Module, Scheduler):
         self.log.info(f'greedy: {download_plan=}')
         return download_plan
     
-    async def symmetric_search(self, event):
-        pass
+    async def update_pensieve(self, download_stats):
+        download_time = download_stats.start_time - download_stats.stop_time 
+        self.abr_controller.update_download_time(download_time)
 
     async def get_download_plan(self, prediction: Prediction):
         return await self.search(prediction)

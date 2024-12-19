@@ -1,5 +1,33 @@
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Optional, List, Callable
+
+@dataclass
+class Settings():
+    w1: float
+    w2: float
+    w3: float
+    w4: float
+    p: Callable 
+    q: Callable
+
+@dataclass
+class PensieveConfig():
+    model_file: str | None
+
+    # QoE parameters
+    settings: Settings
+
+    # This should be obviated but is useful for a constructor elsewhere maybe
+    state_parameters: int
+
+    # Hidden layer size
+    hidden_layer_size: int
+
+    # Number of past chunks to consider
+    state_history_length: int
+
+    # Number of representations
+    action_vector_length: int
 
 @dataclass
 class Prediction():
@@ -177,18 +205,15 @@ class PlayerConfig:
 
     ssl_keylog_file: Optional[str] = None
 
-    # Live event logs file path
-    live_log: Optional[str] = None
-
-    #predicted_events: List[Prediction] = []
-
     initial_buffer = 5.0
     initial_quality = 4
 
     search_method = 'exhaustive'
 
+    pensieve = False
+
     def validate(self) -> None:
-        """Assert if config properties are set properly"""
+        """ Assert if config properties are set properly. """
         assert bool(
             self.input
         ), "A non-empty '--input' arg or 'input' config is required"
