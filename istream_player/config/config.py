@@ -210,7 +210,7 @@ class PlayerConfig:
 
     search_method = 'exhaustive'
 
-    pensieve_weights = '/home/sshippey/advancewarning/istream-player/actor.pth'
+    pensieve_weights = '/home/sshippey/advancewarning/istream-player/simple-actor.pt'
     pensieve = True
 
     def validate(self) -> None:
