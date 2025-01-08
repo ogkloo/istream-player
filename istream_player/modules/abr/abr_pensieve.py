@@ -57,16 +57,13 @@ class PensieveABRController(Module, ABRController):
         self.download_times = []
 
         # Initialize the state dict
-        self.actor = self.initialize_simple_actor()
-        try:
-            ckpt = torch.load(config.pensieve_weights)
-            #self.log.info(ckpt['tConv1d.weight'].shape)
-            for k,v in ckpt.items():
-                self.log.info(f'{k}, {v.shape}')
-            self.actor.load_state_dict(torch.load(config.pensieve_weights))
-            self.log.info(f'Loaded Pensieve weights from {config.pensieve_weights}')
-        except:
-            self.log.error(f'Failed to load weights from {config.pensieve_weights}')
+        self.actor = self.initialize_full_actor_bones()
+        ckpt = torch.load(config.pensieve_weights)
+        #self.log.info(ckpt['tConv1d.weight'].shape)
+        for k,v in ckpt.items():
+            self.log.info(f'{k}, {v.shape}')
+        self.actor.load_state_dict(torch.load(config.pensieve_weights))
+        self.log.info(f'Loaded Pensieve weights from {config.pensieve_weights}')
 
     def initialize_simple_actor(self):
         '''
@@ -77,7 +74,7 @@ class PensieveABRController(Module, ABRController):
     
     def initialize_full_actor_bones(self):
         # TODO: Write up BONES actor
-        pass
+        return ActorBetter()
 
     def initialize_actor(self):
         '''
@@ -136,8 +133,8 @@ class PensieveABRController(Module, ABRController):
                                        prev_bitrate)
 
         with torch.no_grad():
-            action_distribution = self.actor(input)
-            choice = action_distribution.sample()
+            choice = self.actor(input)
+            #choice = action_distribution.sample()
 
         return int(choice)+1
 
@@ -150,7 +147,6 @@ class PensieveABRController(Module, ABRController):
             throughputs = [0] * (self.k - len(throughputs)) + throughputs
 
         # tau_t 
-        # TODO: Download time history
         download_times = self.download_times[:self.k]
         # Pad
         if len(download_times) < self.k:
@@ -310,7 +306,8 @@ class ActorSimple(nn.Module):
     def forward(self, state):
         x = F.relu(self.fc1(state))
         distribution = Categorical(F.softmax(self.fc2(x)))
-        return distribution
+        choice = distribution.sample()
+        return choice
     
     def parse_input(self, 
                     throughput_history, 
@@ -349,7 +346,9 @@ class ActorBetter(nn.Module):
     # This should be parameterized but if we're loading the model there's kinda no point to doing that no?
     #def __init__(self, input_dim, hidden_dim, output_dim, kernel_size):
     def __init__(self):
-        super(ActorSimple, self).__init__()
+        super(ActorBetter, self).__init__()
+
+        self.k = 8
         
         # 1D Convolution layers
         self.tConv1d = nn.Conv1d(1, 128, kernel_size=4)
@@ -384,9 +383,15 @@ class ActorBetter(nn.Module):
         
         # Final layers
         hidden = self.relu(self.fullyConnected(combined))
-        output = self.outputLayer(hidden)
+        logits = self.outputLayer(hidden)
         
-        return output
+        probs = F.softmax(logits, dim=-1)
+        action = torch.argmax(probs, dim=-1)
+        
+        return action
+        #, probs
+        
+        #return output
 
     def parse_input(self, 
                 throughput_history, 
@@ -415,7 +420,7 @@ class ActorBetter(nn.Module):
         left_chunk_t = torch.tensor([[chunks_remaining]], dtype=torch.float32)
         bitrate_t = torch.tensor([[prev_bitrate]], dtype=torch.float32)
 
-        prepared_input = {
+        return {
             'throughput': throughputs_t,
             'download': downloads_t,
             'chunk': chunks_t,
@@ -423,5 +428,3 @@ class ActorBetter(nn.Module):
             'left_chunk': left_chunk_t,
             'bitrate': bitrate_t
         }
-
-        return torch.cat([prepared_input[k].reshape(1, -1) for k in ['throughput', 'download', 'chunk', 'buffer', 'left_chunk', 'bitrate']], dim=1)
