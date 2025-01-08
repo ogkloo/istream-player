@@ -357,6 +357,8 @@ class SchedulerImpl(Module, Scheduler):
             # Check if ABR strategy is Pensieve?
             if self.use_pensieve:
                 for as_id, download_stat in download_stats.items():
+                    download_time = download_stat.stop_time - download_stat.start_time
+                    self.log.info(f'{download_time=}')
                     self.abr_controller.update_download_time(download_stat.stop_time - download_stat.start_time)
                 
 

@@ -45,14 +45,29 @@ class PensieveABRController(Module, ABRController):
         # Must be updated externally
         self.download_times = []
 
-        self.actor = self.initialize_actor()
+        # Initialize the state dict
+        self.actor = self.initialize_simple_actor()
+        if config.pensieve_weights is not None:
+            self.log.info("Loading Pensieve weights")
+            ckpt = torch.load(config.pensieve_weights)
+            #self.log.info(ckpt['tConv1d.weight'].shape)
+            for k,v in ckpt.items():
+                self.log.info(v.shape)
+            self.actor.load_state_dict(torch.load(config.pensieve_weights))
+            self.log.info("Loaded Pensieve weights")
     
+    def initialize_simple_actor(self):
+        return ActorSimple(24, 256, 5, 8)
+    
+    def initialize_full_actor_bones(self):
+        # TODO: Write up BONES actor
+        pass
+
     def initialize_actor(self):
-        ''' Currently returns an untrained dummy network. '''
         return Actor()
 
-    def initialize_critic(hidden_units):
-        pass
+    def initialize_critic(self):
+        return Critic()
 
     def update_selection(
         self, adaptation_sets: Dict[int, AdaptationSet], index: int
@@ -61,7 +76,7 @@ class PensieveABRController(Module, ABRController):
 
         for adaptation_set in adaptation_sets.values():
             final_selections[adaptation_set.id] = (
-                self.choose_ideal_selection_pensieve(adaptation_set)
+                self.choose_ideal_simple(adaptation_set)
             )
         
         self.bandwidth_history += [self.bandwidth_meter.bandwidth]
@@ -75,6 +90,36 @@ class PensieveABRController(Module, ABRController):
                 self.bitrate_history[adaptation_set_id] = [selection]
 
         return final_selections
+    
+    def choose_ideal_simple(self, adaptation_set):
+        bitrates = [
+            representation.bandwidth
+            for representation in adaptation_set.representations.values()
+        ]
+
+        if adaptation_set.id in self.bitrate_history.keys():
+            bitrate_history = self.bitrate_history[adaptation_set.id]
+            prev_bitrate = bitrates[bitrate_history[-1]]
+        else:
+            prev_bitrate = 0
+
+        _, last_segment = self.segment_limits(adaptation_set)
+        chunks_remaining = last_segment - len(self.bitrate_history)
+
+        #self.log.info(self.bandwidth_history, self.download_times, bitrates, self.buffer_manager.buffer_level, chunks_remaining, prev_bitrate)
+        self.log.info(self.bandwidth_history)
+        input = self.actor.parse_input(self.bandwidth_history, 
+                                       self.download_times, 
+                                       bitrates / np.max(bitrates), 
+                                       self.buffer_manager.buffer_level, 
+                                       chunks_remaining, 
+                                       prev_bitrate)
+
+        with torch.no_grad():
+            action_distribution = self.actor(input)
+            choice = action_distribution.sample()
+
+        return int(choice)+1
 
     def choose_ideal_selection_pensieve(self, adaptation_set):
         # Assemble state
@@ -230,3 +275,52 @@ class Critic(nn.Module):
         output = F.relu(combine_input)
 
         return output
+
+class ActorSimple(nn.Module):
+    ''' A simpler version of the model taken from the BONES paper. '''
+    def __init__(self, state_dim, hidden_units, action_dim, k):
+        super(ActorSimple, self).__init__()
+
+        # Input history length
+        self.k = k
+
+        self.fc1 = nn.Linear(state_dim, hidden_units)
+        self.fc2 = nn.Linear(hidden_units, action_dim)
+
+    def forward(self, state):
+        x = F.relu(self.fc1(state))
+        distribution = Categorical(F.softmax(self.fc2(x)))
+        return distribution
+    
+    def parse_input(self, 
+                    throughput_history, 
+                    download_time_history, 
+                    next_bitrates, 
+                    buffer_level, 
+                    chunks_remaining, 
+                    prev_bitrate):
+        # Asseble the state as is to into a usable vector
+
+        # x_t
+        throughputs = throughput_history[:self.k]
+        # Pad
+        if len(throughputs) < self.k:
+            throughputs = [0] * (self.k - len(throughputs)) + throughputs
+
+        # tau_t 
+        download_times = download_time_history[:self.k]
+        # Pad
+        if len(download_times) < self.k:
+            download_times = [0] * (self.k - len(download_times)) + download_times
+
+        # n_t 
+        # This probably needs to be scaled somehow
+        bitrates = sorted(next_bitrates)[-5:]
+
+        throughputs_t = torch.tensor(throughputs, dtype=torch.float32) / 8000
+        download_times_t = torch.tensor(download_times, dtype=torch.float32)
+        bitrates_t = torch.tensor(bitrates, dtype=torch.float32)
+        # l_t
+        out = torch.tensor([buffer_level, prev_bitrate, chunks_remaining], dtype=torch.float32)
+
+        return torch.cat((out, throughputs_t, download_times_t, bitrates_t))

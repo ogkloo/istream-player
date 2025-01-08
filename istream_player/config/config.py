@@ -210,7 +210,8 @@ class PlayerConfig:
 
     search_method = 'exhaustive'
 
-    pensieve = False
+    pensieve_weights = '/home/sshippey/advancewarning/istream-player/actor.pth'
+    pensieve = True
 
     def validate(self) -> None:
         """ Assert if config properties are set properly. """
