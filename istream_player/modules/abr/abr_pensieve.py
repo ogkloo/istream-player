@@ -19,6 +19,17 @@ import numpy as np
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
+'''
+    WARNING: Bad code ahead. Lasciate ogne speranza, voi ch'intrate.
+
+    A lot of this code is adapted from BONES, which you can find on Github: 
+    I use the word "adapted" very loosely as we have totally separate ways of
+    actually downloading segments.
+
+    A lot of this code is bad because it needs to be cleaned, it should function
+    just fine, but modifying it might be harrowing.
+'''
+
 @ModuleOption("pensieve", requires=[BandwidthMeter, BufferManager])
 class PensieveABRController(Module, ABRController):
     log = logging.getLogger("DashABRController")
@@ -47,16 +58,21 @@ class PensieveABRController(Module, ABRController):
 
         # Initialize the state dict
         self.actor = self.initialize_simple_actor()
-        if config.pensieve_weights is not None:
-            self.log.info("Loading Pensieve weights")
+        try:
             ckpt = torch.load(config.pensieve_weights)
             #self.log.info(ckpt['tConv1d.weight'].shape)
             for k,v in ckpt.items():
-                self.log.info(v.shape)
+                self.log.info(f'{k}, {v.shape}')
             self.actor.load_state_dict(torch.load(config.pensieve_weights))
-            self.log.info("Loaded Pensieve weights")
-    
+            self.log.info(f'Loaded Pensieve weights from {config.pensieve_weights}')
+        except:
+            self.log.error(f'Failed to load weights from {config.pensieve_weights}')
+
     def initialize_simple_actor(self):
+        '''
+            Initialize the simple version of the actor from BONES.
+            Unfortunately, everything has to line up right now.
+        '''
         return ActorSimple(24, 256, 5, 8)
     
     def initialize_full_actor_bones(self):
@@ -64,6 +80,9 @@ class PensieveABRController(Module, ABRController):
         pass
 
     def initialize_actor(self):
+        '''
+            Initialize the full version of the actor
+        '''
         return Actor()
 
     def initialize_critic(self):
@@ -74,6 +93,8 @@ class PensieveABRController(Module, ABRController):
     ) -> Dict[int, int]:
         final_selections = dict()
 
+        # TODO: CHOOSE IDEAL METHOD CALLED HERE
+        # Replace with some better way of mapping calls correctly.
         for adaptation_set in adaptation_sets.values():
             final_selections[adaptation_set.id] = (
                 self.choose_ideal_simple(adaptation_set)
@@ -107,10 +128,9 @@ class PensieveABRController(Module, ABRController):
         chunks_remaining = last_segment - len(self.bitrate_history)
 
         #self.log.info(self.bandwidth_history, self.download_times, bitrates, self.buffer_manager.buffer_level, chunks_remaining, prev_bitrate)
-        self.log.info(self.bandwidth_history)
         input = self.actor.parse_input(self.bandwidth_history, 
                                        self.download_times, 
-                                       bitrates / np.max(bitrates), 
+                                       bitrates,
                                        self.buffer_manager.buffer_level, 
                                        chunks_remaining, 
                                        prev_bitrate)
@@ -300,6 +320,7 @@ class ActorSimple(nn.Module):
                     chunks_remaining, 
                     prev_bitrate):
         # Asseble the state as is to into a usable vector
+        action_dim = self.fc2.out_features
 
         # x_t
         throughputs = throughput_history[:self.k]
@@ -314,13 +335,93 @@ class ActorSimple(nn.Module):
             download_times = [0] * (self.k - len(download_times)) + download_times
 
         # n_t 
-        # This probably needs to be scaled somehow
-        bitrates = sorted(next_bitrates)[-5:]
+        bitrates = sorted(next_bitrates)[-action_dim:]
 
         throughputs_t = torch.tensor(throughputs, dtype=torch.float32) / 8000
         download_times_t = torch.tensor(download_times, dtype=torch.float32)
-        bitrates_t = torch.tensor(bitrates, dtype=torch.float32)
+        bitrates_t = torch.tensor(bitrates, dtype=torch.float32) / np.max(bitrates)
         # l_t
         out = torch.tensor([buffer_level, prev_bitrate, chunks_remaining], dtype=torch.float32)
 
         return torch.cat((out, throughputs_t, download_times_t, bitrates_t))
+
+class ActorBetter(nn.Module):
+    # This should be parameterized but if we're loading the model there's kinda no point to doing that no?
+    #def __init__(self, input_dim, hidden_dim, output_dim, kernel_size):
+    def __init__(self):
+        super(ActorSimple, self).__init__()
+        
+        # 1D Convolution layers
+        self.tConv1d = nn.Conv1d(1, 128, kernel_size=4)
+        self.dConv1d = nn.Conv1d(1, 128, kernel_size=4)
+        self.cConv1d = nn.Conv1d(1, 128, kernel_size=4)
+        
+        # Fully connected layers for different inputs
+        self.bufferFc = nn.Linear(1, 128)
+        self.leftChunkFc = nn.Linear(1, 128)
+        self.bitrateFc = nn.Linear(1, 128)
+        
+        # Main fully connected layers
+        self.fullyConnected = nn.Linear(15 * 128, 128)  # 1920 = 15 * 128
+        self.outputLayer = nn.Linear(128, 5)
+        
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        # Assuming x contains all necessary inputs in appropriate format
+        t_conv = self.relu(self.tConv1d(x['throughput']))
+        d_conv = self.relu(self.dConv1d(x['download']))
+        c_conv = self.relu(self.cConv1d(x['chunk']))
+        
+        buffer_fc = self.relu(self.bufferFc(x['buffer']))
+        left_chunk_fc = self.relu(self.leftChunkFc(x['left_chunk']))
+        bitrate_fc = self.relu(self.bitrateFc(x['bitrate']))
+        
+        # Flatten and concatenate all features
+        conv_flat = torch.cat([t_conv.flatten(1), d_conv.flatten(1), c_conv.flatten(1)], dim=1)
+        fc_flat = torch.cat([buffer_fc, left_chunk_fc, bitrate_fc], dim=1)
+        combined = torch.cat([conv_flat, fc_flat], dim=1)
+        
+        # Final layers
+        hidden = self.relu(self.fullyConnected(combined))
+        output = self.outputLayer(hidden)
+        
+        return output
+
+    def parse_input(self, 
+                throughput_history, 
+                download_time_history, 
+                next_bitrates, 
+                buffer_level, 
+                chunks_remaining, 
+                prev_bitrate):
+        # Prepare sequences for Conv1d (shape: [1, 1, k])
+        throughputs = throughput_history[:self.k]
+        if len(throughputs) < self.k:
+            throughputs = [0] * (self.k - len(throughputs)) + throughputs
+        throughputs_t = torch.tensor(throughputs, dtype=torch.float32).view(1, 1, -1) / 8000
+
+        downloads = download_time_history[:self.k]
+        if len(downloads) < self.k:
+            downloads = [0] * (self.k - len(downloads)) + downloads
+        downloads_t = torch.tensor(downloads, dtype=torch.float32).view(1, 1, -1)
+
+        # Prepare chunk sizes (assuming they correlate with bitrates)
+        bitrates = sorted(next_bitrates)[-5:]
+        chunks_t = torch.tensor(bitrates, dtype=torch.float32).view(1, 1, -1) / np.max(bitrates)
+
+        # Scalar inputs
+        buffer_t = torch.tensor([[buffer_level]], dtype=torch.float32)
+        left_chunk_t = torch.tensor([[chunks_remaining]], dtype=torch.float32)
+        bitrate_t = torch.tensor([[prev_bitrate]], dtype=torch.float32)
+
+        prepared_input = {
+            'throughput': throughputs_t,
+            'download': downloads_t,
+            'chunk': chunks_t,
+            'buffer': buffer_t,
+            'left_chunk': left_chunk_t,
+            'bitrate': bitrate_t
+        }
+
+        return torch.cat([prepared_input[k].reshape(1, -1) for k in ['throughput', 'download', 'chunk', 'buffer', 'left_chunk', 'bitrate']], dim=1)
