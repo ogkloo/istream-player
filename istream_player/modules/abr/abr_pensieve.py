@@ -57,7 +57,7 @@ class PensieveABRController(Module, ABRController):
         self.download_times = []
 
         # Initialize the state dict
-        self.actor = self.initialize_full_actor_bones()
+        self.actor = self.initialize_simple_actor()
         ckpt = torch.load(config.pensieve_weights)
         #self.log.info(ckpt['tConv1d.weight'].shape)
         for k,v in ckpt.items():
@@ -390,7 +390,6 @@ class ActorBetter(nn.Module):
         
         return action
         #, probs
-        
         #return output
 
     def parse_input(self, 
