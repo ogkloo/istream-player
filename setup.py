@@ -20,6 +20,7 @@ setup(
         "pytest",
         "parameterized",
         "matplotlib",
+        "pyzmq",
         # This may or may not work if torch is not manually installed previously.
         "torch", "torchvision", "torchaudio"
     ],
