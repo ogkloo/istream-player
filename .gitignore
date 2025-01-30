@@ -207,4 +207,5 @@ dataset/
 runs/
 server
 
+env/*
 env
