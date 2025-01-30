@@ -85,6 +85,8 @@ def main():
     
     config.search_method = args['search_method']
 
+    config.pensieve = (args['mod_abr'] == 'pensieve')
+
     # Then override from arguments
     load_from_dict(args, config)
 
