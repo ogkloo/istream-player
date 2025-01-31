@@ -21,7 +21,6 @@ def main(msg, timeout, port, ack_port):
     publisher.close()
     ctx.term()
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Sends an event message over ZMQ.')
     parser.add_argument("--start", action='store_true', help="Send a start message for logging instead of an event notification.")

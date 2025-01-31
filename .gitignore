@@ -209,3 +209,5 @@ server
 
 env/*
 env
+
+.vscode

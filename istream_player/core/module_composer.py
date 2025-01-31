@@ -203,6 +203,12 @@ class PlayerComposer:
             help="Mutiplication factor for time delayd. Use 0-1 for speedup.",
             type=float,
         )
+        parser.add_argument(
+            "--recv_port",
+            help="Which port to listen on for event notifications.",
+            type=int,
+            default=5555
+        )
         parser.add_argument("--run_dir", "-d", help="Run directory", required=False)
         # pprint(self.module_cli)
         for mod_type, mods in self.module_options.items():

@@ -208,6 +208,7 @@ class PlayerConfig:
     initial_buffer = 5.0
     initial_quality = 4
 
+    recieve_port = 5555
     search_method = 'exhaustive'
 
     pensieve_weights = '/home/sshippey/advancewarning/istream-player/simple-actor.pt'

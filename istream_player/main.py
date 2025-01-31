@@ -83,6 +83,9 @@ def main():
     if args["max_buffer"] is not None:
         config.buffer_duration = args["max_buffer"]
     
+    if args['recv_port'] is not None:
+        config.recieve_port = args['recv_port']
+
     config.search_method = args['search_method']
 
     config.pensieve = (args['mod_abr'] == 'pensieve')

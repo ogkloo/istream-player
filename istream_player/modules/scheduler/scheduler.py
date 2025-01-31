@@ -20,9 +20,6 @@ from istream_player.core.scheduler import Scheduler, SchedulerEventListener
 from istream_player.models import AdaptationSet
 from istream_player.utils import critical_task
 
-RECV_PORT = 5555
-ACK_PORT = 5554
-
 def all_products(A, K):
     """
     Generate all products of set A with lengths ranging from 1 to K.
@@ -99,21 +96,19 @@ class SchedulerImpl(Module, Scheduler):
             elif config.search_method == 'symmetric':
                 self.search = self.symmetric_search
 
-        # ZMQ stuff
-        try:
-            self.context = zmq.Context()
-            self.receiver = self.context.socket(zmq.PULL)
-            self.receiver.connect(f"tcp://localhost:{RECV_PORT}")
-        except:
-            raise Exception('zmq error')
-
         # We only need one worker really
-        self.notification_worker = MessageProcessor(self.context, self.receiver, 1, self.log)
+        self.notification_worker = MessageProcessor(config.recieve_port, log=self.log)
+
         self.notification_worker.register_callback(self.handle_message)
+
+        self.log.info(f'notification worker started {config.recieve_port}')
+        for listener in self.listeners:
+            await listener.on_notification_received(f'notification worker started on port {config.recieve_port}')
 
         self.notification = None
         
         select_as = config.select_as.split("-")
+
         if len(select_as) == 1 and select_as[0].isdecimal():
             self.selected_as_start = int(select_as[0])
             self.selected_as_end = int(select_as[0])
@@ -134,7 +129,7 @@ class SchedulerImpl(Module, Scheduler):
         ]
         ids = itertools.chain(*ids)
         ids = list(itertools.chain(*ids))
-        # print(adap_sets, ids)
+
         return min(ids), max(ids)
 
     @critical_task()
@@ -527,6 +522,10 @@ class SchedulerImpl(Module, Scheduler):
     async def handle_message(self, message):
         ''' This exists to be a callback for the  MessageProcessor.
         '''
+        self.log.info(f'handle_event: Event notification: {message=}')
+        for listener in self.listeners:
+            await listener.on_notification_received('notification: ' + message)
+
         prefix = message.split()[0]
 
         if prefix == 'evs':
@@ -552,14 +551,24 @@ class SchedulerImpl(Module, Scheduler):
             self.log.info(f'handle_event: Unrecognized message prefix. {message=}')
 
         
-class MessageProcessor:
-    def __init__(self, zmq_context, zmq_socket, worker_count=8, log=None):
-        self.zmq_context = zmq_context
-        self.zmq_socket = zmq_socket
-        self.queue = asyncio.Queue(0) # unlimited queue works
+class MessageProcessor():
+    def __init__(self, 
+                 recieve_port: int, 
+                 worker_count: int=1, 
+                 log=None):
+        self.recieve_port = recieve_port
+
+        # ZMQ stuff
+        self.zmq_context = zmq.Context()
+        self.zmq_socket = self.zmq_context.socket(zmq.PULL)
+        self.zmq_socket.connect(f"tcp://127.0.0.1:{self.recieve_port}")
+
+        # unlimited queue works
+        self.queue = asyncio.Queue(0) 
         self._shutdown = False
         self._zmq_read_task = None
         self.callbacks = []
+
         self.workers = []
         self.worker_count = worker_count
 
@@ -587,7 +596,6 @@ class MessageProcessor:
             except Exception:
                 if self.log:
                     self.log.info('enqueue: fucked')
-                pass
 
     async def __worker_task(self, worker_id):
         while not self._shutdown:
@@ -620,9 +628,10 @@ class MessageProcessor:
             self.log.info('created task')
 
         for i in range(self.worker_count):
+            self.log.info(f'created task -- {i}')
             worker = asyncio.create_task(self.__worker_task(worker_id=i))
             self.workers.append(worker)
-        
+
         if self.log:
             self.log.info('finished start task')
             
