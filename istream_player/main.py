@@ -67,6 +67,12 @@ def main():
             format="%(asctime)s %(name)20s %(levelname)8s:\t%(message)s",
         )
         del args["verbose"]
+    elif args["quiet"]:
+        logging.basicConfig(
+            level=logging.ERROR,
+            format="%(asctime)s %(name)20s %(levelname)8s:\t%(message)s",
+        )
+        del args["quiet"]
     else:
         logging.basicConfig(
             level=logging.INFO,
@@ -76,17 +82,23 @@ def main():
     # Add prediction events to player config
     if args["initial_buffer"] is not None:
         config.initial_buffer = args["initial_buffer"]
+        del args["initial_buffer"]
     
     if args["initial_quality"] is not None:
         config.initial_quality = args["initial_quality"]
+        del args["initial_quality"]
     
     if args["max_buffer"] is not None:
         config.buffer_duration = args["max_buffer"]
+        del args["max_buffer"]
     
     if args['recv_port'] is not None:
         config.recieve_port = args['recv_port']
+        del args['recv_port']
 
-    config.search_method = args['search_method']
+    if args['search_method'] is not None:
+        config.search_method = args['search_method']
+        del args['search_method']
 
     config.pensieve = (args['mod_abr'] == 'pensieve')
 

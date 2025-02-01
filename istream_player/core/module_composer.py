@@ -199,13 +199,20 @@ class PlayerComposer:
             required=False,
         )
         parser.add_argument(
+            "-q",
+            "--quiet",
+            help="Set logging level to error",
+            action="store_true",
+            required=False,
+        )
+        parser.add_argument(
             "--time_factor",
             help="Mutiplication factor for time delayd. Use 0-1 for speedup.",
             type=float,
         )
         parser.add_argument(
             "--recv_port",
-            help="Which port to listen on for event notifications.",
+            help="Which port to listen on for PHY event notifications.",
             type=int,
             default=5555
         )

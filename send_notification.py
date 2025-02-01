@@ -8,7 +8,6 @@ def send_action(action, port):
     publisher = ctx.socket(zmq.PUSH)
     publisher.bind(f"tcp://127.0.0.1:{port}")
 
-    #sleep(0.1)
     publisher.send_string(f'{action} now')
 
 def main(msg, timeout, port, ack_port):

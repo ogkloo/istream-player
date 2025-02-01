@@ -44,7 +44,6 @@ class SchedulerImpl(Module, Scheduler):
 
     # Before the notification comes, we need to focus on 
     # exactly meeting our initial conditions.
-
     def __init__(self):
         super().__init__()
 
