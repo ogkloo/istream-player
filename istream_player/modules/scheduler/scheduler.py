@@ -5,7 +5,7 @@ import zmq
 import math
 
 from asyncio import Task
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, List
 from dataclasses import dataclass
 
 from istream_player.config.config import (Settings, Prediction, PlayerConfig)
@@ -94,6 +94,8 @@ class SchedulerImpl(Module, Scheduler):
                 self.search = self.greedy_search
             elif config.search_method == 'symmetric':
                 self.search = self.symmetric_search
+            elif config.search_method == 'explicit':
+                self.search = self.explicit_plan
 
         # We only need one worker really
         self.notification_worker = MessageProcessor(config.recieve_port, log=self.log)
@@ -510,6 +512,11 @@ class SchedulerImpl(Module, Scheduler):
         download_plan = [{0: idx} for idx,repr in plan]
         self.log.info(f'greedy: {download_plan=}')
         return download_plan
+
+    async def explicit_plan(self, plan: List[int]):
+        download_plan = [{0: idx} for idx in plan]
+        self.log.info(f'explicit: {download_plan=}')
+        return download_plan
     
     async def update_pensieve(self, download_stats):
         download_time = download_stats.start_time - download_stats.stop_time 
@@ -546,6 +553,14 @@ class SchedulerImpl(Module, Scheduler):
             self.log.info('handle_event: stop')
             for listener in self.listeners:
                 await listener.on_notification_received(prefix)
+
+        elif prefix == 'explicit':
+            # This is for a plan explicitly given to us, i.e. download this specific set of segments in this order
+            self.log.info('handle_event: explicit')
+            self.notification = [int(r) for r in message.split()[1].split(',')]
+            for listener in self.listeners:
+                await listener.on_notification_received(message)
+
         else:
             self.log.info(f'handle_event: Unrecognized message prefix. {message=}')
 

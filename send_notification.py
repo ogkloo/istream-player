@@ -10,6 +10,19 @@ def send_action(action, port):
 
     publisher.send_string(f'{action} now')
 
+    publisher.close()
+    ctx.term()
+
+def send_plan(plan, port):
+    ctx = zmq.Context()
+    publisher = ctx.socket(zmq.PUSH)
+    publisher.bind(f"tcp://127.0.0.1:{port}")
+
+    publisher.send_string(f'explicit {plan}')
+
+    publisher.close()
+    ctx.term()
+
 def main(msg, timeout, port, ack_port):
     ctx = zmq.Context()
     publisher = ctx.socket(zmq.PUSH)
@@ -22,8 +35,15 @@ def main(msg, timeout, port, ack_port):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Sends an event message over ZMQ.')
-    parser.add_argument("--start", action='store_true', help="Send a start message for logging instead of an event notification.")
-    parser.add_argument("--stop", action='store_true', help="Send a stop message for logging instead of an event notification.")
+    parser.add_argument("--start", 
+                        action='store_true', 
+                        help="Send a start message for logging instead of an event notification.")
+    parser.add_argument("--stop", 
+                        action='store_true', 
+                        help="Send a stop message for logging instead of an event notification.")
+    parser.add_argument("--explicit", 
+                        action='store_true', 
+                        help="Send an explicit plan rather than creating one at runtime. Message should be a list of qualities.")
     parser.add_argument("-m", "--message", type=str, 
                         help="Message to send.", 
                         required=False)
@@ -51,5 +71,7 @@ if __name__ == "__main__":
         send_action('start', send_port)
     elif args.stop:
         send_action('stop', send_port)
+    elif args.explicit:
+        send_plan(message, send_port)
     else:
         main(message, timeout, send_port, ack_port)
