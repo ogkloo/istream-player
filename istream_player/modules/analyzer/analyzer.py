@@ -99,6 +99,7 @@ class PlaybackAnalyzer(
         self._cont_bw: List[Tuple[float, int]] = []
         self._states: List[Tuple[float, State, float]] = []
         self._notifications: List[Prediction] = []
+        self._plans: List[Dict[int, int]] = []
         self._segments_by_url: Dict[str, AnalyzerSegment] = {}
         self._position = 0
         self._stalls: List[Stall] = []
@@ -175,6 +176,9 @@ class PlaybackAnalyzer(
             {'time': self._seconds_since(self._start_time), 
              'notification': notification}
         )
+
+    async def on_plan_created(self, plan):
+        self._plans.append(plan)
 
     async def on_segment_download_start(
         self, index, adap_bw: Dict[int, float], segments: Dict[int, Segment]
@@ -341,6 +345,7 @@ class PlaybackAnalyzer(
             ],
             "buffer_level": list(map(asdict, self._buffer_levels)),
             "notifications": self._notifications,
+            "plans": self._plans,
         }
 
         if self.dump_results_path is not None:
@@ -350,6 +355,7 @@ class PlaybackAnalyzer(
                 "buffer_level": data["buffer_level"],
                 "segments": data["segments"],
                 "notifications": data["notifications"],
+                "plans": data["plans"],
             }
             json.dump(d, sys.stdout, indent=4)
 

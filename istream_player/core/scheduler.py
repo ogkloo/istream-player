@@ -35,6 +35,9 @@ class SchedulerEventListener(ABC):
     async def on_notification_received(self, notification):
         pass
 
+    async def on_plan_created(self, notification):
+        pass
+
 
 class Scheduler(ModuleInterface, ABC):
     def __init__(self) -> None:

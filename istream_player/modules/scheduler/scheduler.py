@@ -159,6 +159,9 @@ class SchedulerImpl(Module, Scheduler):
 
                 download_plan = await self.search(prediction)
 
+                for listener in self.listeners:
+                    await listener.on_plan_created(download_plan)
+
                 # Download each segment one after another and don't screw up stateful variables
                 for selections in download_plan:
                     self.log.info(f'{selections=}')
