@@ -94,7 +94,7 @@ class Prediction():
         
         return elapsed_time
     
-    def download_time2(self, file_size, t, log=None):
+    def download_time_old(self, file_size, t, log=None):
         if log:
             log.info(f'{file_size=}, {t=}, {self.time_to_event * self.bw_old}')
 
