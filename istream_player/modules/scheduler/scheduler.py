@@ -4,6 +4,10 @@ import logging
 import zmq
 import math
 
+import multiprocessing
+import ctypes
+import time
+
 from asyncio import Task
 from typing import Dict, Optional, Set, List
 from dataclasses import dataclass
@@ -152,7 +156,9 @@ class SchedulerImpl(Module, Scheduler):
             notification = self.notification
 
             if notification is not None and self.perform_mitigation:
-                # Weird, modified part of the scheduler -- Bad code ahead!! Reader beware!!!
+                for listener in self.listeners:
+                    await listener.on_notification_received(f'notification consumed: {notification=}')
+                # Weird, modified part of the scheduler
                 self.log.info(f'Received {notification=} @ {self.buffer_manager.buffer_level}, {self._index=}')
                 notification_received = True
                 prediction = self.notification
@@ -612,7 +618,7 @@ class MessageProcessor():
                 break
             except Exception:
                 if self.log:
-                    self.log.info('enqueue: fucked')
+                    self.log.info('enqueue: failed')
 
     async def __worker_task(self, worker_id):
         while not self._shutdown:
@@ -672,3 +678,59 @@ class MessageProcessor():
 
         await asyncio.gather(*self.workers, return_exceptions=True)        
         await self.queue.join()
+
+'''
+class SharedMemoryIPC:
+    def __init__(self, size):
+        self.size = size
+        self.shared_memory = multiprocessing.Array(ctypes.c_char, size)
+        self.lock = multiprocessing.Lock()
+
+    def write(self, data):
+        with self.lock:
+            self.shared_memory[:len(data)] = data.encode('utf-8')
+
+    def read(self):
+        with self.lock:
+            return bytes(self.shared_memory[:]).decode('utf-8').rstrip('\x00')
+
+class MessageProcessor:
+    def __init__(self, ipc, worker_count=1, log=None):
+        self.ipc = ipc
+        self._shutdown = False
+        self.callbacks = []
+        self.workers = []
+        self.worker_count = worker_count
+        self.log = log
+
+    def start(self):
+        self._shutdown = False
+        for i in range(self.worker_count):
+            worker = multiprocessing.Process(target=self.__worker_task, args=(i,))
+            worker.start()
+            self.workers.append(worker)
+
+    def register_callback(self, func):
+        if not callable(func):
+            raise ValueError("Callback must be callable")
+        self.callbacks.append(func)
+        if self.log:
+            self.log.info('registered callback')
+
+    def __worker_task(self, worker_id):
+        while not self._shutdown:
+            message = self.ipc.read()
+            if message:
+                for callback in self.callbacks:
+                    try:
+                        callback(message)
+                    except Exception as e:
+                        print("Callback failed: ", e)
+            time.sleep(0.01)  # Spin wait
+
+    def stop(self):
+        self._shutdown = True
+        for worker in self.workers:
+            worker.terminate()
+            worker.join()
+'''
